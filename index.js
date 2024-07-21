@@ -3,6 +3,7 @@ const { createServer } = require("http");
 const setupSocket = require("./socket");
 
 const app = express();
+app.use(cors())
 const httpServer = createServer(app);
 setupSocket(httpServer)
 
