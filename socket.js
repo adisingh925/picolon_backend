@@ -39,40 +39,7 @@ const setupSocket = (server) => {
     io.on(CONNECTION, (socket) => {
         console.log(`Client Connected: ${socket.id}`);
 
-        // If there's at least one client waiting, pair them with the new client
-        if (waitingClients.length > 0) {
-            const peerSocket = waitingClients.pop(); // Get the waiting client
-            const room = `${peerSocket.id}#${socket.id}`; // Create a unique room for the two clients
-
-            socket.join(room);
-            peerSocket.join(room);
-
-            // Save room info
-            rooms.set(room, { socket1: socket, socket2: peerSocket });
-
-            socket.to(room).emit(PAIRED, "You are now connected to -> " + peerSocket.id);
-            peerSocket.to(room).emit(PAIRED, "You are now connected to -> " + socket.id);
-
-            // Handle messages between paired clients
-            socket.on(MESSAGE, (msg) => {
-                if (canSendMessage(socket.id)) {
-                    socket.to(room).emit(MESSAGE, msg);
-                } else {
-                    socket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
-                }
-            });
-
-            peerSocket.on(MESSAGE, (msg) => {
-                if (canSendMessage(peerSocket.id)) {
-                    peerSocket.to(room).emit(MESSAGE, msg);
-                } else {
-                    peerSocket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
-                }
-            });
-        } else {
-            // If no clients are waiting, add the new client to the waiting list
-            waitingClients.push(socket);
-        }
+        reconnect(socket);
 
         // Handle disconnection
         socket.on(DISCONNECT, () => {
@@ -88,8 +55,7 @@ const setupSocket = (server) => {
                     // Remove the room
                     rooms.delete(room);
 
-                    // Optionally, add the remaining client back to the waiting list
-                    waitingClients.push(remainingSocket);
+                    reconnect(remainingSocket);
                     break;
                 }
             }
@@ -117,5 +83,42 @@ const canSendMessage = (socketId) => {
     messageCounts.set(socketId, data);
     return data.count <= MESSAGE_LIMIT;
 };
+
+const reconnect = (socket) => {
+    // If there's at least one client waiting, pair them with the new client
+    if (waitingClients.length > 0) {
+        const peerSocket = waitingClients.pop(); // Get the waiting client
+        const room = `${peerSocket.id}#${socket.id}`; // Create a unique room for the two clients
+
+        socket.join(room);
+        peerSocket.join(room);
+
+        // Save room info
+        rooms.set(room, { socket1: socket, socket2: peerSocket });
+
+        socket.to(room).emit(PAIRED, "You are now connected to -> " + peerSocket.id);
+        peerSocket.to(room).emit(PAIRED, "You are now connected to -> " + socket.id);
+
+        // Handle messages between paired clients
+        socket.on(MESSAGE, (msg) => {
+            if (canSendMessage(socket.id)) {
+                socket.to(room).emit(MESSAGE, msg);
+            } else {
+                socket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
+            }
+        });
+
+        peerSocket.on(MESSAGE, (msg) => {
+            if (canSendMessage(peerSocket.id)) {
+                peerSocket.to(room).emit(MESSAGE, msg);
+            } else {
+                peerSocket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
+            }
+        });
+    } else {
+        // If no clients are waiting, add the new client to the waiting list
+        waitingClients.push(socket);
+    }
+}
 
 module.exports = setupSocket;
