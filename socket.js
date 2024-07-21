@@ -14,9 +14,9 @@ const CONNECTION = "connection";
 const DISCONNECT = "disconnect";
 
 // Custom events
-const MESSAGE = "Message";
-const PAIRED = "Paired";
-const PEER_DISCONNECTED = "PeerDisconnected";
+const MESSAGE = "message";
+const PAIRED = "paired";
+const PEER_DISCONNECTED = "peer_disconnected";
 
 // Set of blocked IPs
 const blockedIPs = new Set([]);
