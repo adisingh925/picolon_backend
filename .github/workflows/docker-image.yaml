@@ -35,9 +35,9 @@ jobs:
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
           port: ${{ secrets.PORT }}
-          script: docker stop ${{ secrets.DOCKER_REPOSITORY_NAME }}
-                docker rm ${{ secrets.DOCKER_REPOSITORY_NAME }}
-                docker rmi ${{ secrets.DOCKER_REPOSITORY_NAME }}:v1
-                docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1
-                docker run -d --name ${{ secrets.DOCKER_REPOSITORY_NAME }} -p 80:80 --restart unless-stopped ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1
-                ; exit
+          script: docker stop ${{ secrets.DOCKER_REPOSITORY_NAME }};
+                docker rm ${{ secrets.DOCKER_REPOSITORY_NAME }};
+                docker rmi ${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
+                docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
+                docker run -d --name ${{ secrets.DOCKER_REPOSITORY_NAME }} -p 80:80 --restart unless-stopped ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
+                exit
