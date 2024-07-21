@@ -1,12 +1,22 @@
 const express = require("express");
-const { createServer } = require("http");
+const https = require("https");
 const setupSocket = require("./socket");
+const fs = require("fs");
 
 const app = express();
 
-const httpServer = createServer(app);
-setupSocket(httpServer)
+const httpsServer = https.createServer(
+  {
+    key: fs.readFileSync("ssl/blivix_key.key"),
+    cert: fs.readFileSync("ssl/blivix_certificate_chain.cer"),
+    requestCert: true,
+    rejectUnauthorized: false,
+  },
+  app
+);
 
-httpServer.listen(80, () => {
-  console.log("Server is listening on port 80");
+setupSocket(httpsServer)
+
+httpsServer.listen(443, () => {
+  console.log("Server is listening on port 443");
 });
