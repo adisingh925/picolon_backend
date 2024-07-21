@@ -7,8 +7,9 @@ const app = express();
 
 const httpsServer = https.createServer(
   {
-    key: fs.readFileSync("ssl/blivix_key.key"),
-    cert: fs.readFileSync("ssl/blivix_certificate_chain.cer"),
+    key: fs.readFileSync("ssl/private.key"),
+    cert: fs.readFileSync("ssl/certificate.crt"),
+    ca: fs.readFileSync("ssl/ca_bundle.crt"),
     requestCert: true,
     rejectUnauthorized: false,
   },
