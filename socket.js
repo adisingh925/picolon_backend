@@ -3,6 +3,11 @@ let io;
 
 const waitingClients = []; // List to keep track of waiting clients
 const rooms = new Map(); // Map to keep track of active rooms and their members
+const messageCounts = new Map();
+
+// Message rate limit
+const MESSAGE_LIMIT = 3;
+const INTERVAL_MS = 1000;
 
 // Socket events
 const CONNECTION = "connection";
@@ -13,8 +18,18 @@ const MESSAGE = "message";
 const PAIRED = "Paired";
 const PEER_DISCONNECTED = "peerDisconnected";
 
+// Set of blocked IPs
+const blockedIPs = new Set([]);
+
 const setupSocket = (server) => {
     io = new Server(server);
+
+    io.use((socket, next) => {
+        if (blockedIPs.has(socket.handshake.address)) {
+            return next(new Error('Blocked IP'));
+        }
+        next();
+    });
 
     io.on(CONNECTION, (socket) => {
         console.log(`Client Connected: ${socket.id}`);
@@ -35,11 +50,19 @@ const setupSocket = (server) => {
 
             // Handle messages between paired clients
             socket.on(MESSAGE, (msg) => {
-                socket.to(room).emit(MESSAGE, msg);
+                if (canSendMessage(socket.id)) {
+                    socket.to(room).emit(MESSAGE, msg);
+                } else {
+                    socket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
+                }
             });
 
             peerSocket.on(MESSAGE, (msg) => {
-                peerSocket.to(room).emit(MESSAGE, msg);
+                if (canSendMessage(peerSocket.id)) {
+                    peerSocket.to(room).emit(MESSAGE, msg);
+                } else {
+                    peerSocket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
+                }
             });
         } else {
             // If no clients are waiting, add the new client to the waiting list
@@ -74,5 +97,20 @@ const setupSocket = (server) => {
         });
     });
 }
+
+const canSendMessage = (socketId) => {
+    const now = Date.now();
+    const data = messageCounts.get(socketId) || { count: 0, lastTime: now };
+
+    if (now - data.lastTime > INTERVAL_MS) {
+        data.count = 1;
+        data.lastTime = now;
+    } else {
+        data.count += 1;
+    }
+
+    messageCounts.set(socketId, data);
+    return data.count <= MESSAGE_LIMIT;
+};
 
 module.exports = setupSocket;
