@@ -1,4 +1,5 @@
 const { Server } = require("socket.io");
+var cors = require('cors')
 let io;
 
 const waitingClients = []; // List to keep track of waiting clients
@@ -22,7 +23,12 @@ const PEER_DISCONNECTED = "peerDisconnected";
 const blockedIPs = new Set([]);
 
 const setupSocket = (server) => {
-    io = new Server(server);
+    io = new Server(server, {
+        cors: {
+            origin: 'http://localhost:3000', // Replace with your client's origin if different
+            methods: ['GET', 'POST'],
+        },
+    });
 
     io.use((socket, next) => {
         if (blockedIPs.has(socket.handshake.address)) {
