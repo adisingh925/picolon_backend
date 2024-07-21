@@ -1,5 +1,4 @@
 const { Server } = require("socket.io");
-var cors = require('cors')
 let io;
 
 const waitingClients = []; // List to keep track of waiting clients
