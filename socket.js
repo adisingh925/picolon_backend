@@ -101,19 +101,11 @@ const reconnect = (socket) => {
 
         // Handle messages between paired clients
         socket.on(MESSAGE, (msg) => {
-            if (canSendMessage(socket.id)) {
-                socket.to(room).emit(MESSAGE, msg);
-            } else {
-                socket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
-            }
+            socket.to(room).emit(MESSAGE, msg);
         });
 
         peerSocket.on(MESSAGE, (msg) => {
-            if (canSendMessage(peerSocket.id)) {
-                peerSocket.to(room).emit(MESSAGE, msg);
-            } else {
-                peerSocket.emit('rateLimitExceeded', 'You are sending messages too quickly. Please slow down.');
-            }
+            peerSocket.to(room).emit(MESSAGE, msg);
         });
     } else {
         // If no clients are waiting, add the new client to the waiting list
