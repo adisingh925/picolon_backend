@@ -20,6 +20,7 @@ const PEER_DISCONNECTED = "peer_disconnected";
 
 // Set of blocked IPs
 const blockedIPs = new Set([]);
+const socketToRoom = new Map(); // Map to quickly find which room a socket is in
 
 const setupSocket = (server) => {
     io = new Server(server, {
@@ -27,13 +28,6 @@ const setupSocket = (server) => {
             origin: ['http://localhost:3000', "https://picolon.com"], // Replace with your client's origin if different
             methods: ['GET', 'POST'],
         },
-    });
-
-    io.use((socket, next) => {
-        if (blockedIPs.has(socket.handshake.address)) {
-            return next(new Error('Blocked IP'));
-        }
-        next();
     });
 
     io.on(CONNECTION, (socket) => {
@@ -45,19 +39,21 @@ const setupSocket = (server) => {
         socket.on(DISCONNECT, () => {
             console.log(`Client Disconnected: ${socket.id}`);
 
-            // Check if the disconnected client was in a room
-            for (const [room, clients] of rooms.entries()) {
-                if (clients.socket1.id === socket.id || clients.socket2.id === socket.id) {
-                    // Notify the remaining client
-                    const remainingSocket = (clients.socket1.id === socket.id) ? clients.socket2 : clients.socket1;
-                    remainingSocket.emit(PEER_DISCONNECTED, "Your peer is disconnected");
+            // Check if the disconnected client was in a room using socketToRoom
+            const room = socketToRoom.get(socket.id);
+            if (room) {
+                const { socket1, socket2 } = rooms.get(room);
+                
+                // Notify the remaining client
+                const remainingSocket = (socket1.id === socket.id) ? socket2 : socket1;
+                remainingSocket.emit(PEER_DISCONNECTED, "Your peer is disconnected");
 
-                    // Remove the room
-                    rooms.delete(room);
+                // Remove the room
+                rooms.delete(room);
+                socketToRoom.delete(socket.id);
+                socketToRoom.delete(remainingSocket.id);
 
-                    reconnect(remainingSocket);
-                    break;
-                }
+                reconnect(remainingSocket);
             }
 
             // Remove the disconnected client from the waiting list if present
@@ -95,6 +91,8 @@ const reconnect = (socket) => {
 
         // Save room info
         rooms.set(room, { socket1: socket, socket2: peerSocket });
+        socketToRoom.set(socket.id, room);
+        socketToRoom.set(peerSocket.id, room);
 
         socket.to(room).emit(PAIRED, "You are now connected to -> " + peerSocket.id);
         peerSocket.to(room).emit(PAIRED, "You are now connected to -> " + socket.id);
