@@ -41,7 +41,7 @@ const reconnect = async (socket) => {
     lock.acquire("reconnect", async () => {
         // If there's at least one client waiting, pair them with the new client
         if (waitingClients.length > 0) {
-            
+
             // Randomly select a client
             const peerSocket = waitingClients.splice(Math.floor(Math.random() * waitingClients.length), 1)[0];
 
@@ -78,7 +78,7 @@ const reconnect = async (socket) => {
 }
 
 const disconnect = (socket) => {
-    lock.acquire("reconnect", async (done) => {
+    lock.acquire("disconnect", async (done) => {
         // Check if the disconnected client was in a room using socketToRoom
         const room = socketToRoom.get(socket.id);
         if (room) {
