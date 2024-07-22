@@ -1,13 +1,10 @@
 const { Server } = require("socket.io");
+var AsyncLock = require('async-lock');
+var lock = new AsyncLock();
 let io;
 
 const waitingClients = []; // List to keep track of waiting clients
 const rooms = new Map(); // Map to keep track of active rooms and their members
-const messageCounts = new Map();
-
-// Message rate limit
-const MESSAGE_LIMIT = 3;
-const INTERVAL_MS = 1000;
 
 // Socket events
 const CONNECTION = "connection";
@@ -18,8 +15,6 @@ const MESSAGE = "message";
 const PAIRED = "paired";
 const PEER_DISCONNECTED = "peer_disconnected";
 
-// Set of blocked IPs
-const blockedIPs = new Set([]);
 const socketToRoom = new Map(); // Map to quickly find which room a socket is in
 
 const setupSocket = (server) => {
@@ -32,83 +27,85 @@ const setupSocket = (server) => {
 
     io.on(CONNECTION, (socket) => {
         console.log(`Client Connected: ${socket.id}`);
-
         reconnect(socket);
 
         // Handle disconnection
         socket.on(DISCONNECT, () => {
             console.log(`Client Disconnected: ${socket.id}`);
-
-            // Check if the disconnected client was in a room using socketToRoom
-            const room = socketToRoom.get(socket.id);
-            if (room) {
-                const { socket1, socket2 } = rooms.get(room);
-                
-                // Notify the remaining client
-                const remainingSocket = (socket1.id === socket.id) ? socket2 : socket1;
-                remainingSocket.emit(PEER_DISCONNECTED, "Your peer is disconnected");
-
-                // Remove the room
-                rooms.delete(room);
-                socketToRoom.delete(socket.id);
-                socketToRoom.delete(remainingSocket.id);
-
-                reconnect(remainingSocket);
-            }
-
-            // Remove the disconnected client from the waiting list if present
-            const index = waitingClients.indexOf(socket);
-            if (index !== -1) {
-                waitingClients.splice(index, 1);
-            }
+            disconnect(socket);
         });
     });
 }
 
-const canSendMessage = (socketId) => {
-    const now = Date.now();
-    const data = messageCounts.get(socketId) || { count: 0, lastTime: now };
+const reconnect = async (socket) => {
+    lock.acquire("reconnect", async () => {
+        // If there's at least one client waiting, pair them with the new client
+        if (waitingClients.length > 0) {
+            
+            // Randomly select a client
+            const peerSocket = waitingClients.splice(Math.floor(Math.random() * waitingClients.length), 1)[0];
 
-    if (now - data.lastTime > INTERVAL_MS) {
-        data.count = 1;
-        data.lastTime = now;
-    } else {
-        data.count += 1;
-    }
+            // Create a unique room for the two clients
+            const room = `${peerSocket.id}#${socket.id}`; 
 
-    messageCounts.set(socketId, data);
-    return data.count <= MESSAGE_LIMIT;
-};
+            // Join the room
+            socket.join(room);
+            peerSocket.join(room);
 
-const reconnect = (socket) => {
-    // If there's at least one client waiting, pair them with the new client
-    if (waitingClients.length > 0) {
-        const peerSocket = waitingClients.pop(); // Get the waiting client
-        const room = `${peerSocket.id}#${socket.id}`; // Create a unique room for the two clients
+            // Save room info
+            rooms.set(room, { socket1: socket, socket2: peerSocket });
+            socketToRoom.set(socket.id, room);
+            socketToRoom.set(peerSocket.id, room);
 
-        socket.join(room);
-        peerSocket.join(room);
+            socket.to(room).emit(PAIRED, "You are now connected to -> " + peerSocket.id);
+            peerSocket.to(room).emit(PAIRED, "You are now connected to -> " + socket.id);
 
-        // Save room info
-        rooms.set(room, { socket1: socket, socket2: peerSocket });
-        socketToRoom.set(socket.id, room);
-        socketToRoom.set(peerSocket.id, room);
+            // Handle messages between paired clients
+            socket.on(MESSAGE, (msg) => {
+                socket.to(room).emit(MESSAGE, msg);
+            });
 
-        socket.to(room).emit(PAIRED, "You are now connected to -> " + peerSocket.id);
-        peerSocket.to(room).emit(PAIRED, "You are now connected to -> " + socket.id);
+            peerSocket.on(MESSAGE, (msg) => {
+                peerSocket.to(room).emit(MESSAGE, msg);
+            });
+        } else {
+            // If no clients are waiting, add the new client to the waiting list
+            waitingClients.push(socket);
+        }
+    }, function (err, ret) {
+        console.log("reconnect lock release");
+    }, {});
+}
 
-        // Handle messages between paired clients
-        socket.on(MESSAGE, (msg) => {
-            socket.to(room).emit(MESSAGE, msg);
-        });
+const disconnect = (socket) => {
+    lock.acquire("reconnect", async (done) => {
+        // Check if the disconnected client was in a room using socketToRoom
+        const room = socketToRoom.get(socket.id);
+        if (room) {
+            const { socket1, socket2 } = rooms.get(room);
 
-        peerSocket.on(MESSAGE, (msg) => {
-            peerSocket.to(room).emit(MESSAGE, msg);
-        });
-    } else {
-        // If no clients are waiting, add the new client to the waiting list
-        waitingClients.push(socket);
-    }
+            // Notify the remaining client
+            const remainingSocket = (socket1.id === socket.id) ? socket2 : socket1;
+            remainingSocket.emit(PEER_DISCONNECTED, "Your peer is disconnected");
+
+            // Remove the room
+            rooms.delete(room);
+            socketToRoom.delete(socket.id);
+            socketToRoom.delete(remainingSocket.id);
+
+            done();
+
+            reconnect(remainingSocket);
+        } else {
+            // Remove the client from waiting list
+            const index = waitingClients.indexOf(socket);
+            if (index !== -1) {
+                waitingClients.splice(index, 1);
+            }
+        }
+    }, function (err, ret) {
+        console.log("disconnect lock release")
+    }, {});
 }
 
 module.exports = setupSocket;
