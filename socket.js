@@ -77,7 +77,7 @@ const reconnect = async (socket) => {
     }, {});
 }
 
-const disconnect = (socket) => {
+const disconnect = async (socket) => {
     lock.acquire("disconnect", async (done) => {
         // Check if the disconnected client was in a room using socketToRoom
         const room = socketToRoom.get(socket.id);
@@ -103,6 +103,8 @@ const disconnect = (socket) => {
                 waitingClients.splice(index, 1);
             }
         }
+
+        done();
     }, function (err, ret) {
         console.log("disconnect lock release")
     }, {});
