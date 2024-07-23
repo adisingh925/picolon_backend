@@ -46,7 +46,7 @@ const reconnect = async (socket) => {
             const peerSocket = waitingClients.splice(Math.floor(Math.random() * waitingClients.length), 1)[0];
 
             // Create a unique room for the two clients
-            const room = `${peerSocket.id}#${socket.id}`; 
+            const room = `${peerSocket.id}#${socket.id}`;
 
             // Join the room
             socket.join(room);
@@ -57,8 +57,8 @@ const reconnect = async (socket) => {
             socketToRoom.set(socket.id, room);
             socketToRoom.set(peerSocket.id, room);
 
-            socket.to(room).emit(PAIRED, "You are now connected to -> " + peerSocket.id);
-            peerSocket.to(room).emit(PAIRED, "You are now connected to -> " + socket.id);
+            socket.to(room).emit(PAIRED, peerSocket.id);
+            peerSocket.to(room).emit(PAIRED, socket.id);
 
             // Handle messages between paired clients
             socket.on(MESSAGE, (msg) => {
