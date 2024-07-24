@@ -3,8 +3,15 @@ var AsyncLock = require('async-lock');
 var lock = new AsyncLock();
 let io;
 
-const waitingClients = []; // List to keep track of waiting clients
-const rooms = new Map(); // Map to keep track of active rooms and their members
+const doubleChatRoomWaitingPeople = [];
+const doubleVideoRoomWaitingPeople = [];
+const doubleChatRooms = new Map();
+const doubleVideoRooms = new Map();
+
+// -1 -> new connection
+// 0 -> double chat room
+// 1 -> double video room
+const personChoice = new Map();
 
 // Socket events
 const CONNECTION = "connection";
@@ -27,7 +34,8 @@ const setupSocket = (server) => {
 
     io.on(CONNECTION, (socket) => {
         console.log(`Client Connected: ${socket.id}`);
-        reconnect(socket);
+
+        reconnect(socket, socket.request._query['RT']);
 
         // Handle disconnection
         socket.on(DISCONNECT, () => {
@@ -37,40 +45,61 @@ const setupSocket = (server) => {
     });
 }
 
-const reconnect = async (socket) => {
+const reconnect = async (socket, roomType) => {
     lock.acquire("reconnect", async () => {
-        // If there's at least one client waiting, pair them with the new client
-        if (waitingClients.length > 0) {
+        if (roomType == 1 || roomType == 2) {
+            // Save the client's choice
+            personChoice.set(socket.id, roomType);
 
-            // Randomly select a client
-            const peerSocket = waitingClients.splice(Math.floor(Math.random() * waitingClients.length), 1)[0];
+            // If there's at least one client waiting, pair them with the new client
+            var peerSocket = null;
 
-            // Create a unique room for the two clients
-            const room = `${peerSocket.id}#${socket.id}`;
+            if (roomType == 1) {
+                if (doubleChatRoomWaitingPeople.length > 0) {
+                    peerSocket = doubleChatRoomWaitingPeople.splice(Math.floor(Math.random() * doubleChatRoomWaitingPeople.length), 1)[0];
+                } else {
+                    doubleChatRoomWaitingPeople.push(socket);
+                }
+            } else if (roomType == 2) {
+                if (doubleVideoRoomWaitingPeople.length > 0) {
+                    peerSocket = doubleVideoRoomWaitingPeople.splice(Math.floor(Math.random() * doubleVideoRoomWaitingPeople.length), 1)[0];
+                } else {
+                    doubleVideoRoomWaitingPeople.push(socket);
+                }
+            }
 
-            // Join the room
-            socket.join(room);
-            peerSocket.join(room);
+            if (peerSocket != null) {
+                // Create a unique room for the two clients
+                const room = `${peerSocket.id}#${socket.id}`;
 
-            // Save room info
-            rooms.set(room, { socket1: socket, socket2: peerSocket });
-            socketToRoom.set(socket.id, room);
-            socketToRoom.set(peerSocket.id, room);
+                // Join the room
+                socket.join(room);
+                peerSocket.join(room);
 
-            socket.to(room).emit(PAIRED, peerSocket.id);
-            peerSocket.to(room).emit(PAIRED, socket.id);
+                // Save room info
+                if (roomType == 1) {
+                    doubleChatRooms.set(room, { socket1: socket, socket2: peerSocket });
+                } else if (roomType == 2) {
+                    doubleVideoRooms.set(room, { socket1: socket, socket2: peerSocket });
+                }
 
-            // Handle messages between paired clients
-            socket.on(MESSAGE, (msg) => {
-                socket.to(room).emit(MESSAGE, msg);
-            });
+                socketToRoom.set(socket.id, room);
+                socketToRoom.set(peerSocket.id, room);
 
-            peerSocket.on(MESSAGE, (msg) => {
-                peerSocket.to(room).emit(MESSAGE, msg);
-            });
+                socket.to(room).emit(PAIRED, peerSocket.id);
+                peerSocket.to(room).emit(PAIRED, socket.id);
+
+                // Handle messages between paired clients
+                socket.on(MESSAGE, (msg) => {
+                    socket.to(room).emit(MESSAGE, msg);
+                });
+
+                peerSocket.on(MESSAGE, (msg) => {
+                    peerSocket.to(room).emit(MESSAGE, msg);
+                });
+            }
         } else {
-            // If no clients are waiting, add the new client to the waiting list
-            waitingClients.push(socket);
+            socket.disconnect();
         }
     }, function (err, ret) {
         console.log("reconnect lock release");
@@ -81,26 +110,40 @@ const disconnect = async (socket) => {
     lock.acquire("disconnect", async (done) => {
         // Check if the disconnected client was in a room using socketToRoom
         const room = socketToRoom.get(socket.id);
+        const roomType = personChoice.get(socket.id);
+
         if (room) {
-            const { socket1, socket2 } = rooms.get(room);
+            const { socket1, socket2 } = doubleChatRooms.get(room);
 
             // Notify the remaining client
             const remainingSocket = (socket1.id === socket.id) ? socket2 : socket1;
             remainingSocket.emit(PEER_DISCONNECTED, "Your peer is disconnected");
 
             // Remove the room
-            rooms.delete(room);
+            if (roomType == 1) {
+                doubleChatRooms.delete(room);
+            } else if (roomType == 2) {
+                doubleVideoRooms.delete(room);
+            }
+
             socketToRoom.delete(socket.id);
             socketToRoom.delete(remainingSocket.id);
 
             done();
 
-            reconnect(remainingSocket);
+            reconnect(remainingSocket, roomType);
         } else {
             // Remove the client from waiting list
-            const index = waitingClients.indexOf(socket);
-            if (index !== -1) {
-                waitingClients.splice(index, 1);
+            if (roomType == 1) {
+                const index = doubleChatRoomWaitingPeople.indexOf(socket);
+                if (index !== -1) {
+                    doubleChatRoomWaitingPeople.splice(index, 1);
+                }
+            } else if (roomType == 2) {
+                const index = doubleVideoRoomWaitingPeople.indexOf(socket);
+                if (index !== -1) {
+                    doubleVideoRoomWaitingPeople.splice(index, 1);
+                }
             }
         }
 
