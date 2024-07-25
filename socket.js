@@ -115,18 +115,14 @@ const disconnect = async (socket) => {
         const roomType = personChoice.get(socket.id);
 
         if (room) {
-            const { socket1, socket2 } = doubleChatRooms.get(room);
+            const { socket1, socket2 } = room == 1 ? doubleChatRooms.get(room) : doubleVideoRooms.get(room);
 
             // Notify the remaining client
             const remainingSocket = (socket1.id === socket.id) ? socket2 : socket1;
             remainingSocket.emit(PEER_DISCONNECTED, "Your peer is disconnected");
 
-            // Remove the room
-            if (roomType == 1) {
-                doubleChatRooms.delete(room);
-            } else if (roomType == 2) {
-                doubleVideoRooms.delete(room);
-            }
+            // Remove the room from the map
+            roomType == 1 ? doubleChatRooms.delete(room) : doubleVideoRooms.delete(room);
 
             socketToRoom.delete(socket.id);
             socketToRoom.delete(remainingSocket.id);
