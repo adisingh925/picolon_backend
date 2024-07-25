@@ -74,11 +74,7 @@ const reconnect = async (socket, roomType) => {
                 peerSocket.join(room);
 
                 // Save room info
-                if (roomType == 1) {
-                    doubleChatRooms.set(room, { socket1: socket, socket2: peerSocket });
-                } else if (roomType == 2) {
-                    doubleVideoRooms.set(room, { socket1: socket, socket2: peerSocket });
-                }
+                roomType == 1 ? doubleChatRooms.set(room, { socket1: socket, socket2: peerSocket }) : doubleVideoRooms.set(room, { socket1: socket, socket2: peerSocket });
 
                 socketToRoom.set(socket.id, room);
                 socketToRoom.set(peerSocket.id, room);
