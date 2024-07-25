@@ -115,7 +115,7 @@ const disconnect = async (socket) => {
         const roomType = personChoice.get(socket.id);
 
         if (room) {
-            const { socket1, socket2 } = room == 1 ? doubleChatRooms.get(room) : doubleVideoRooms.get(room);
+            const { socket1, socket2 } = roomType == 1 ? doubleChatRooms.get(room) : doubleVideoRooms.get(room);
 
             // Notify the remaining client
             const remainingSocket = (socket1.id === socket.id) ? socket2 : socket1;
@@ -132,16 +132,10 @@ const disconnect = async (socket) => {
             reconnect(remainingSocket, roomType);
         } else {
             // Remove the client from waiting list
-            if (roomType == 1) {
-                const index = doubleChatRoomWaitingPeople.indexOf(socket);
-                if (index !== -1) {
-                    doubleChatRoomWaitingPeople.splice(index, 1);
-                }
-            } else if (roomType == 2) {
-                const index = doubleVideoRoomWaitingPeople.indexOf(socket);
-                if (index !== -1) {
-                    doubleVideoRoomWaitingPeople.splice(index, 1);
-                }
+            const waitingPeople = roomType == 1 ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
+            const index = waitingPeople.indexOf(socket);
+            if (index !== -1) {
+                waitingPeople.splice(index, 1);
             }
         }
 
