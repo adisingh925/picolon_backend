@@ -7,10 +7,6 @@ const doubleChatRoomWaitingPeople = [];
 const doubleVideoRoomWaitingPeople = [];
 const doubleChatRooms = new Map();
 const doubleVideoRooms = new Map();
-
-// -1 -> new connection
-// 0 -> double chat room
-// 1 -> double video room
 const personChoice = new Map();
 
 // Socket events
@@ -21,6 +17,7 @@ const DISCONNECT = "disconnect";
 const MESSAGE = "message";
 const PAIRED = "paired";
 const PEER_DISCONNECTED = "peer_disconnected";
+const INITIATOR = "initiator";
 
 const socketToRoom = new Map(); // Map to quickly find which room a socket is in
 
@@ -88,6 +85,11 @@ const reconnect = async (socket, roomType) => {
 
                 socket.to(room).emit(PAIRED, peerSocket.id);
                 peerSocket.to(room).emit(PAIRED, socket.id);
+
+                //If it's a video chat, assign the initiator
+                if (roomType == 2) {
+                    socket.emit(INITIATOR, "You are the initiator!");
+                }
 
                 // Handle messages between paired clients
                 socket.on(MESSAGE, (msg) => {
