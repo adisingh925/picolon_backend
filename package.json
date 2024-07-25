@@ -10,6 +10,7 @@
   "description": "",
   "dependencies": {
     "async-lock": "^1.4.1",
+    "autocannon": "^7.15.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "nodemon": "^3.1.4",

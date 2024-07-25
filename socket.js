@@ -8,6 +8,7 @@ const doubleVideoRoomWaitingPeople = [];
 const doubleChatRooms = new Map();
 const doubleVideoRooms = new Map();
 const personChoice = new Map();
+const socketToRoom = new Map(); // Map to quickly find which room a socket is in
 
 // Socket events
 const CONNECTION = "connection";
@@ -19,7 +20,6 @@ const PAIRED = "paired";
 const PEER_DISCONNECTED = "peer_disconnected";
 const INITIATOR = "initiator";
 
-const socketToRoom = new Map(); // Map to quickly find which room a socket is in
 
 const setupSocket = (server) => {
     io = new Server(server, {
@@ -43,62 +43,62 @@ const setupSocket = (server) => {
 }
 
 const reconnect = async (socket, roomType) => {
-    lock.acquire("reconnect", async () => {
-        if (roomType == 1 || roomType == 2) {
-            // Save the client's choice
-            personChoice.set(socket.id, roomType);
+    lock.acquire("reconnect", async (done) => {
 
-            // If there's at least one client waiting, pair them with the new client
-            var peerSocket = null;
-
-            if (roomType == 1) {
-                if (doubleChatRoomWaitingPeople.length > 0) {
-                    peerSocket = doubleChatRoomWaitingPeople.splice(Math.floor(Math.random() * doubleChatRoomWaitingPeople.length), 1)[0];
-                } else {
-                    doubleChatRoomWaitingPeople.push(socket);
-                }
-            } else if (roomType == 2) {
-                if (doubleVideoRoomWaitingPeople.length > 0) {
-                    peerSocket = doubleVideoRoomWaitingPeople.splice(Math.floor(Math.random() * doubleVideoRoomWaitingPeople.length), 1)[0];
-                } else {
-                    doubleVideoRoomWaitingPeople.push(socket);
-                }
-            }
-
-            if (peerSocket != null) {
-                // Create a unique room for the two clients
-                const room = `${peerSocket.id}#${socket.id}`;
-
-                // Join the room
-                socket.join(room);
-                peerSocket.join(room);
-
-                // Save room info
-                roomType == 1 ? doubleChatRooms.set(room, { socket1: socket, socket2: peerSocket }) : doubleVideoRooms.set(room, { socket1: socket, socket2: peerSocket });
-
-                socketToRoom.set(socket.id, room);
-                socketToRoom.set(peerSocket.id, room);
-
-                socket.to(room).emit(PAIRED, peerSocket.id);
-                peerSocket.to(room).emit(PAIRED, socket.id);
-
-                //If it's a video chat, assign the initiator
-                if (roomType == 2) {
-                    socket.emit(INITIATOR, "You are the initiator!");
-                }
-
-                // Handle messages between paired clients
-                socket.on(MESSAGE, (msg) => {
-                    socket.to(room).emit(MESSAGE, msg);
-                });
-
-                peerSocket.on(MESSAGE, (msg) => {
-                    peerSocket.to(room).emit(MESSAGE, msg);
-                });
-            }
-        } else {
+        if (roomType != 1 && roomType != 2) {
             socket.disconnect();
+            done();
+            return;
         }
+
+        // Save the client's choice
+        personChoice.set(socket.id, roomType);
+
+        const waitingPeople = roomType == 1 ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
+
+        var peerSocket = null;
+
+        if (waitingPeople.length > 0) {
+            peerSocket = waitingPeople.splice(Math.floor(Math.random() * waitingPeople.length), 1)[0];
+        } else {
+            waitingPeople.push(socket);
+            done();
+            return;
+        }
+
+        if (peerSocket) {
+            // Create a unique room for the two clients
+            const room = `${peerSocket.id}#${socket.id}`;
+
+            // Join the room
+            socket.join(room);
+            peerSocket.join(room);
+
+            // Save room info
+            const rooms = roomType == 1 ? doubleChatRooms : doubleVideoRooms;
+            rooms.set(room, { socket1: socket, socket2: peerSocket });
+            socketToRoom.set(socket.id, room);
+            socketToRoom.set(peerSocket.id, room);
+
+            socket.to(room).emit(PAIRED, peerSocket.id);
+            peerSocket.to(room).emit(PAIRED, socket.id);
+
+            //If it's a video chat, assign the initiator
+            if (roomType == 2) {
+                socket.emit(INITIATOR, "You are the initiator!");
+            }
+
+            // Handle messages between paired clients
+            socket.on(MESSAGE, (msg) => {
+                socket.to(room).emit(MESSAGE, msg);
+            });
+
+            peerSocket.on(MESSAGE, (msg) => {
+                peerSocket.to(room).emit(MESSAGE, msg);
+            });
+        }
+
+        done();
     }, function (err, ret) {
         console.log("reconnect lock release");
     }, {});
@@ -109,6 +109,7 @@ const disconnect = async (socket) => {
         // Check if the disconnected client was in a room using socketToRoom
         const room = socketToRoom.get(socket.id);
         const roomType = personChoice.get(socket.id);
+        personChoice.delete(socket.id);
 
         if (room) {
             const { socket1, socket2 } = roomType == 1 ? doubleChatRooms.get(room) : doubleVideoRooms.get(room);
@@ -119,7 +120,6 @@ const disconnect = async (socket) => {
 
             // Remove the room from the map
             roomType == 1 ? doubleChatRooms.delete(room) : doubleVideoRooms.delete(room);
-
             socketToRoom.delete(socket.id);
             socketToRoom.delete(remainingSocket.id);
 
