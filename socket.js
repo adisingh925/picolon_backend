@@ -80,8 +80,8 @@ const reconnect = async (socket, roomType) => {
             socketToRoom.set(socket.id, room);
             socketToRoom.set(peerSocket.id, room);
 
-            socket.to(room).emit(PAIRED, peerSocket.id);
-            peerSocket.to(room).emit(PAIRED, socket.id);
+            socket.to(room).emit(PAIRED, "You are connected to Stranger");
+            peerSocket.to(room).emit(PAIRED, "You are connected to Stranger");
 
             //If it's a video chat, assign the initiator
             if (roomType == 2) {
