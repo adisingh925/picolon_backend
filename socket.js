@@ -26,7 +26,7 @@ const WARNING = "warning";
 
 // limits
 const MAX_CONNECTIONS_PER_IP = 3;
-const MAX_PAYLOAD_SIZE = 1024;
+const MAX_PAYLOAD_SIZE = 1048576;
 
 const setupSocket = (server) => {
     io = new Server(server, {
