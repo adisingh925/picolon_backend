@@ -3,6 +3,7 @@ const https = require("https");
 const setupSocket = require("./socket");
 const fs = require("fs");
 const helmet = require("helmet");
+const handleLog = require("./logging/logger");
 
 const app = express();
 app.use(helmet());
@@ -22,5 +23,5 @@ const httpsServer = https.createServer(
 setupSocket(httpsServer)
 
 httpsServer.listen(443, () => {
-  console.log("Server is listening on port 443");
+  handleLog("Server is listening on port 443");
 });
