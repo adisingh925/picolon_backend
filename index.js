@@ -4,6 +4,7 @@ const setupSocket = require("./socket");
 const fs = require("fs");
 const helmet = require("helmet");
 const handleLog = require("./logging/logger");
+require("dotenv").config();
 
 const app = express();
 app.use(helmet());
