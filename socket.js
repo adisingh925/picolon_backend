@@ -3,12 +3,14 @@ var AsyncLock = require('async-lock');
 var lock = new AsyncLock();
 let io;
 
+// maps to store necessary data
 const doubleChatRoomWaitingPeople = [];
 const doubleVideoRoomWaitingPeople = [];
 const doubleChatRooms = new Map();
 const doubleVideoRooms = new Map();
 const personChoice = new Map();
-const socketToRoom = new Map(); // Map to quickly find which room a socket is in
+const socketToRoom = new Map();
+const ipConnectionCounts = new Map();
 
 // Socket events
 const CONNECTION = "connection";
@@ -20,13 +22,32 @@ const PAIRED = "paired";
 const PEER_DISCONNECTED = "peer_disconnected";
 const INITIATOR = "initiator";
 
+// limits
+const MAX_CONNECTIONS_PER_IP = 3;
 
 const setupSocket = (server) => {
     io = new Server(server, {
         cors: {
-            origin: ['http://localhost:3000', "https://picolon.com"], // Replace with your client's origin if different
+            origin: ['http://localhost:3000', "https://picolon.com"],
             methods: ['GET', 'POST'],
         },
+    });
+
+    io.use((socket, next) => {
+        lock.acquire("ipcheck", async () => {
+            const ip = socket.handshake.address;
+
+            const connectionCount = ipConnectionCounts.get(ip) || 0;
+            if (connectionCount >= MAX_CONNECTIONS_PER_IP) {
+                return next(new Error(`Only ${MAX_CONNECTIONS_PER_IP} connections per IP are allowed.`));
+            } else {
+                ipConnectionCounts.set(ip, connectionCount + 1);
+            }
+
+            next();
+        }, function (err, ret) {
+            console.log("ipcheck lock release");
+        }, {})
     });
 
     io.on(CONNECTION, (socket) => {
@@ -47,6 +68,7 @@ const reconnect = async (socket, roomType) => {
 
         if (roomType != 1 && roomType != 2) {
             socket.disconnect();
+            ipConnectionCounts.delete(socket.handshake.address);
             done();
             return;
         }
@@ -107,6 +129,7 @@ const reconnect = async (socket, roomType) => {
 const disconnect = async (socket) => {
     lock.acquire("disconnect", async (done) => {
         // Check if the disconnected client was in a room using socketToRoom
+        ipConnectionCounts.delete(socket.handshake.address);
         const room = socketToRoom.get(socket.id);
         const roomType = personChoice.get(socket.id);
         personChoice.delete(socket.id);
