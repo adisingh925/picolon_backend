@@ -69,15 +69,34 @@ const setupSocket = (server) => {
         // token bucket rate limiter
         socket.use(socketIORateLimiter({ proxy: false, maxBurst: 5, perSecond: 1, gracePeriodInSeconds: 15, emitClientHtmlError: true }, socket));
 
-        // payload size limiter
-        socket.use((packet, next) => {
+        socket.use(async (packet, next) => {
             try {
                 const [event, payload] = packet;
-                if (Buffer.byteLength(payload, 'utf8') > MAX_PAYLOAD_SIZE) {
+
+                let size;
+
+                if (Buffer.isBuffer(payload)) {
+                    size = payload.length;
+                } else if (payload instanceof ArrayBuffer) {
+                    size = Buffer.from(payload).length;
+                } else if (payload instanceof Blob) {
+                    const arrayBuffer = await payload.arrayBuffer();
+                    size = Buffer.from(arrayBuffer).length;
+                } else if (typeof payload === 'string') {
+                    size = Buffer.byteLength(payload, 'utf8');
+                } else if (typeof payload === 'object') {
+                    size = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+                } else {
+                    size = Buffer.byteLength(String(payload), 'utf8');
+                }
+
+                // Check if the payload size exceeds the maximum allowed size
+                if (size > MAX_PAYLOAD_SIZE) {
                     handleLog(`Payload size exceeded the limit for socket ${socket.id}`);
                     socket.emit(WARNING, { message: `Payload size exceeded the limit.`, code: 413 });
                     return;
                 }
+
                 next();
             } catch (error) {
                 handleLog(`Error in payload size limiter: ${error.message}`);
