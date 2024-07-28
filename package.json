@@ -9,6 +9,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@d3vision/socket.io-rate-limiter": "^1.0.1",
     "async-lock": "^1.4.1",
     "cors": "^2.8.5",
     "express": "^4.19.2",

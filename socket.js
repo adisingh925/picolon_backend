@@ -1,5 +1,6 @@
 const { Server } = require("socket.io");
 var AsyncLock = require('async-lock');
+const socketIORateLimiter = require("@d3vision/socket.io-rate-limiter");
 var lock = new AsyncLock();
 let io;
 
@@ -21,9 +22,11 @@ const MESSAGE = "message";
 const PAIRED = "paired";
 const PEER_DISCONNECTED = "peer_disconnected";
 const INITIATOR = "initiator";
+const WARNING = "warning";
 
 // limits
 const MAX_CONNECTIONS_PER_IP = 3;
+const MAX_PAYLOAD_SIZE = 1024;
 
 const setupSocket = (server) => {
     io = new Server(server, {
@@ -52,6 +55,19 @@ const setupSocket = (server) => {
 
     io.on(CONNECTION, (socket) => {
         console.log(`Client Connected: ${socket.id}`);
+
+        // token bucket rate limiter
+        socket.use(socketIORateLimiter({ proxy: false, maxBurst: 5, perSecond: 1, gracePeriodInSeconds: 15, emitClientHtmlError: true }, socket));
+
+        // payload size limiter
+        socket.use((packet, next) => {
+            const [event, payload] = packet;
+            if (Buffer.byteLength(payload, 'utf8') > MAX_PAYLOAD_SIZE) {
+                socket.emit(WARNING, { message: `Payload size exceeds the limit.`, code: 413 });
+                return;
+            }
+            next();
+        });
 
         reconnect(socket, socket.request._query['RT']);
 
