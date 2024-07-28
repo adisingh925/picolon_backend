@@ -2,8 +2,11 @@ const express = require("express");
 const https = require("https");
 const setupSocket = require("./socket");
 const fs = require("fs");
+const helmet = require("helmet");
 
 const app = express();
+app.use(helmet());
+app.disable('x-powered-by');
 
 const httpsServer = https.createServer(
   {
