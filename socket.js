@@ -72,7 +72,7 @@ const setupSocket = (server) => {
 
                 if (typeof payload === 'object') {
                     handleLog("Payload is a object");
-                    size = Buffer.byteLength(payload, 'utf8');
+                    size = Buffer.byteLength(JSON.stringify(payload), 'utf8');
                 } else {
                     // Reject any other type of payload
                     handleLog(`Unsupported payload type for socket ${socket.id}`);
