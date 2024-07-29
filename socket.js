@@ -1,6 +1,7 @@
 const { Server } = require("socket.io");
 var AsyncLock = require('async-lock');
 const handleLog = require("./logging/logger");
+const { RateLimiterMemory } = require('rate-limiter-flexible');
 var lock = new AsyncLock();
 let io;
 
@@ -25,10 +26,13 @@ const INITIATOR = "initiator";
 const WARNING = "warning";
 
 // limits
-const MAX_CONNECTIONS_PER_IP = 5;
-const TEXT_PAYLOAD_SIZE = 5000;
-const AUDIO_PAYLOAD_SIZE = 500000;
-const IMAGE_PAYLOAD_SIZE = 1048576;
+const MAX_CONNECTIONS_PER_IP = 3;
+
+// Rate limiter config
+const rateLimiter = new RateLimiterMemory({
+    points: 5, // 10 requests
+    duration: 1, // per second per IP
+});
 
 const setupSocket = (server) => {
     io = new Server(server, {
@@ -66,42 +70,20 @@ const setupSocket = (server) => {
     io.on(CONNECTION, (socket) => {
         handleLog(`Client Connected: ${socket.id}`);
 
-        socket.use(async (packet, next) => {
-            try {
-                const [, payload] = packet;
-
-                let size;
-                let maxPayloadSize;
-
-                if (typeof payload === 'object' && ["audio", "text", "image"].includes(payload.type)) {
-                    size = Buffer.byteLength(JSON.stringify(payload), 'utf8');
-                } else {
-                    handleLog(`Unsupported payload type for socket ${socket.id}`);
-                    socket.emit(WARNING, { message: `Unsupported payload type.`, code: 415 });
-                    return;
-                }
-
-                // Check if the payload size exceeds the maximum allowed size
-                if (size <= TEXT_PAYLOAD_SIZE && payload.type === "text") {
-                    maxPayloadSize = TEXT_PAYLOAD_SIZE;
-                } else if (size <= AUDIO_PAYLOAD_SIZE && payload.type === "audio") {
-                    maxPayloadSize = AUDIO_PAYLOAD_SIZE;
-                } else if (size <= IMAGE_PAYLOAD_SIZE && payload.type === "image") {
-                    maxPayloadSize = IMAGE_PAYLOAD_SIZE;
-                }
-
-                if (size > maxPayloadSize) {
-                    handleLog(`Payload size exceeded the limit for socket ${socket.id}`);
-                    socket.emit(WARNING, { message: `Payload size exceeded the limit.`, code: 413 });
-                    return;
-                }
-
+        // Apply rate limiter to each event
+        socket.use((packet, next) => {
+            rateLimiter.consume(socket.id)
+            .then(() => {
                 next();
-            } catch (error) {
-                handleLog(`Error in payload size limiter: ${error.message}`);
-            }
+            })
+            .catch(() => {
+                handleLog(`Rate limit exceeded for ${socket.id}`);
+                socket.emit(WARNING, {
+                    message: "Rate limit exceeded. Please try again later.",
+                    code: 429
+                });
+            });
         });
-
 
         reconnect(socket, socket.request._query['RT']);
 
