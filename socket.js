@@ -26,7 +26,7 @@ const WARNING = "warning";
 
 // limits
 const MAX_CONNECTIONS_PER_IP = 5;
-const MAX_PAYLOAD_SIZE = 1024;
+const MAX_PAYLOAD_SIZE = 1048576;
 
 const setupSocket = (server) => {
     io = new Server(server, {
@@ -73,6 +73,7 @@ const setupSocket = (server) => {
                 if (typeof payload === 'object') {
                     handleLog("Payload is a object");
                     size = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+                    console.log(size);
                 } else {
                     // Reject any other type of payload
                     handleLog(`Unsupported payload type for socket ${socket.id}`);
