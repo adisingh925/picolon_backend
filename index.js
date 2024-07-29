@@ -24,6 +24,5 @@ const httpsServer = https.createServer(
 setupSocket(httpsServer)
 
 httpsServer.listen(443, () => {
-  console.log(process.env.NODE_ENV);
   handleLog("Server is listening on port 443");
 });
