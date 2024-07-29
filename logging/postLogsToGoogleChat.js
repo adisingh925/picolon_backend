@@ -1,6 +1,7 @@
 const axios = require('axios');
 
 async function postLogToGoogleChat(errorMessage) {
+    console.log(process.env.NODE_ENV);
     if (process.env.NODE_ENV === 'production') {
         try {
             await axios.post(

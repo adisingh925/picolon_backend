@@ -70,16 +70,9 @@ const setupSocket = (server) => {
 
                 let size;
 
-                if (typeof payload === 'string') {
-                    handleLog("Payload is a string");
+                if (typeof payload === 'object') {
+                    handleLog("Payload is a object");
                     size = Buffer.byteLength(payload, 'utf8');
-                } else if (payload instanceof ArrayBuffer) {
-                    handleLog("Payload is an ArrayBuffer");
-                    size = Buffer.from(payload).length;
-                } else if (payload instanceof Blob) {
-                    handleLog("Payload is a Blob");
-                    const arrayBuffer = await payload.arrayBuffer();
-                    size = Buffer.from(arrayBuffer).length;
                 } else {
                     // Reject any other type of payload
                     handleLog(`Unsupported payload type for socket ${socket.id}`);
