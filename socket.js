@@ -29,9 +29,14 @@ const WARNING = "warning";
 const MAX_CONNECTIONS_PER_IP = 3;
 
 // Rate limiter config
-const rateLimiter = new RateLimiterMemory({
-    points: 15, // 10 requests
-    duration: 1, // per second per IP
+const messagesRateLimiter = new RateLimiterMemory({
+    points: 3,
+    duration: 1,
+});
+
+const signalRateLimiter = new RateLimiterMemory({
+    points: 30,
+    duration: 1,
 });
 
 const setupSocket = (server) => {
@@ -71,18 +76,30 @@ const setupSocket = (server) => {
         handleLog(`Client Connected: ${socket.id}`);
 
         // Apply rate limiter to each event
-        socket.use((_packet, next) => {
-            rateLimiter.consume(socket.id)
-            .then(() => {
-                next();
-            })
-            .catch(() => {
-                handleLog(`Rate limit exceeded for ${socket.id}`);
-                socket.emit(WARNING, {
-                    message: "Rate limit exceeded. Please try again later.",
-                    code: 429
+        socket.use((packet, next) => {
+            const [event, data] = packet;
+
+            if (["audio", "text", "image"].includes(data.type)) {
+                messagesRateLimiter.consume(socket.id).then(() => {
+                    next();
+                }).catch(() => {
+                    handleLog(`Rate limit exceeded for ${socket.id}`);
+                    socket.emit(WARNING, {
+                        message: "Rate limit exceeded. Please try again later.",
+                        code: 429
+                    });
                 });
-            });
+            } else if (data.type === "signal") {
+                signalRateLimiter.consume(socket.id).then(() => {
+                    next();
+                }).catch(() => {
+                    handleLog(`Rate limit exceeded for ${socket.id}`);
+                    socket.emit(WARNING, {
+                        message: "Rate limit exceeded. Please try again later.",
+                        code: 429
+                    });
+                });
+            }
         });
 
         reconnect(socket, socket.request._query['RT']);
