@@ -70,7 +70,7 @@ const setupSocket = (server) => {
 
                 let size;
 
-                if (typeof payload === 'object' && payload.type in ["audio", "video", "image"]) {
+                if (typeof payload === 'object' && ["audio", "video", "image"].includes(payload.type)) {
                     size = Buffer.byteLength(JSON.stringify(payload), 'utf8');
                 } else {
                     handleLog(`Unsupported payload type for socket ${socket.id}`);
