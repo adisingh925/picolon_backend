@@ -30,7 +30,7 @@ const MAX_CONNECTIONS_PER_IP = 3;
 
 // Rate limiter config
 const rateLimiter = new RateLimiterMemory({
-    points: 5, // 10 requests
+    points: 10, // 10 requests
     duration: 1, // per second per IP
 });
 
