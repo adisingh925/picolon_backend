@@ -26,7 +26,9 @@ const WARNING = "warning";
 
 // limits
 const MAX_CONNECTIONS_PER_IP = 5;
-const MAX_PAYLOAD_SIZE = 1048576;
+const TEXT_PAYLOAD_SIZE = 5000;
+const AUDIO_PAYLOAD_SIZE = 500000;
+const IMAGE_PAYLOAD_SIZE = 1048576;
 
 const setupSocket = (server) => {
     io = new Server(server, {
@@ -66,9 +68,10 @@ const setupSocket = (server) => {
 
         socket.use(async (packet, next) => {
             try {
-                const [event, payload] = packet;
+                const [, payload] = packet;
 
                 let size;
+                let maxPayloadSize;
 
                 if (typeof payload === 'object' && ["audio", "text", "image"].includes(payload.type)) {
                     size = Buffer.byteLength(JSON.stringify(payload), 'utf8');
@@ -79,7 +82,15 @@ const setupSocket = (server) => {
                 }
 
                 // Check if the payload size exceeds the maximum allowed size
-                if (size > MAX_PAYLOAD_SIZE) {
+                if (size <= TEXT_PAYLOAD_SIZE && payload.type === "text") {
+                    maxPayloadSize = TEXT_PAYLOAD_SIZE;
+                } else if (size <= AUDIO_PAYLOAD_SIZE && payload.type === "audio") {
+                    maxPayloadSize = AUDIO_PAYLOAD_SIZE;
+                } else if (size <= IMAGE_PAYLOAD_SIZE && payload.type === "image") {
+                    maxPayloadSize = IMAGE_PAYLOAD_SIZE;
+                }
+
+                if (size > maxPayloadSize) {
                     handleLog(`Payload size exceeded the limit for socket ${socket.id}`);
                     socket.emit(WARNING, { message: `Payload size exceeded the limit.`, code: 413 });
                     return;
