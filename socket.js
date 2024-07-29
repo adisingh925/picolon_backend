@@ -1,7 +1,5 @@
 const { Server } = require("socket.io");
 var AsyncLock = require('async-lock');
-const socketIORateLimiter = require("@d3vision/socket.io-rate-limiter");
-const postLogToGoogleChat = require("./logging/postLogsToGoogleChat");
 const handleLog = require("./logging/logger");
 var lock = new AsyncLock();
 let io;
@@ -27,8 +25,8 @@ const INITIATOR = "initiator";
 const WARNING = "warning";
 
 // limits
-const MAX_CONNECTIONS_PER_IP = 3;
-const MAX_PAYLOAD_SIZE = 1048576;
+const MAX_CONNECTIONS_PER_IP = 5;
+const MAX_PAYLOAD_SIZE = 1024;
 
 const setupSocket = (server) => {
     io = new Server(server, {
@@ -65,6 +63,43 @@ const setupSocket = (server) => {
 
     io.on(CONNECTION, (socket) => {
         handleLog(`Client Connected: ${socket.id}`);
+
+        socket.use(async (packet, next) => {
+            try {
+                const [event, payload] = packet;
+
+                let size;
+
+                if (typeof payload === 'string') {
+                    handleLog("Payload is a string");
+                    size = Buffer.byteLength(payload, 'utf8');
+                } else if (payload instanceof ArrayBuffer) {
+                    handleLog("Payload is an ArrayBuffer");
+                    size = Buffer.from(payload).length;
+                } else if (payload instanceof Blob) {
+                    handleLog("Payload is a Blob");
+                    const arrayBuffer = await payload.arrayBuffer();
+                    size = Buffer.from(arrayBuffer).length;
+                } else {
+                    // Reject any other type of payload
+                    handleLog(`Unsupported payload type for socket ${socket.id}`);
+                    socket.emit(WARNING, { message: `Unsupported payload type.`, code: 415 });
+                    return;
+                }
+
+                // Check if the payload size exceeds the maximum allowed size
+                if (size > MAX_PAYLOAD_SIZE) {
+                    handleLog(`Payload size exceeded the limit for socket ${socket.id}`);
+                    socket.emit(WARNING, { message: `Payload size exceeded the limit.`, code: 413 });
+                    return;
+                }
+
+                next();
+            } catch (error) {
+                handleLog(`Error in payload size limiter: ${error.message}`);
+            }
+        });
+
 
         reconnect(socket, socket.request._query['RT']);
 
