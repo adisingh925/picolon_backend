@@ -71,7 +71,7 @@ const setupSocket = (server) => {
         handleLog(`Client Connected: ${socket.id}`);
 
         // Apply rate limiter to each event
-        socket.use((packet, next) => {
+        socket.use((_packet, next) => {
             rateLimiter.consume(socket.id)
             .then(() => {
                 next();
