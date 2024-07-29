@@ -35,7 +35,7 @@ const messagesRateLimiter = new RateLimiterMemory({
 });
 
 const signalRateLimiter = new RateLimiterMemory({
-    points: 30,
+    points: 15,
     duration: 1,
 });
 
