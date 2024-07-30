@@ -45,6 +45,7 @@ const setupSocket = (server) => {
             origin: ['http://localhost:3000', "https://picolon.com"],
             methods: ['GET', 'POST'],
         },
+        maxHttpBufferSize: 307200,
     });
 
     io.use((socket, next) => {
