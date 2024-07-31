@@ -8,4 +8,4 @@ COPY .env .
 COPY logging /backend/logging
 COPY /ssl /backend/ssl
 RUN npm install
-CMD [ "node", "index.js" ]
+CMD [ "node", "websocket.js" ]
