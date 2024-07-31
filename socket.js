@@ -26,7 +26,7 @@ const INITIATOR = "initiator";
 const WARNING = "warning";
 
 // limits
-const MAX_CONNECTIONS_PER_IP = 3;
+const MAX_CONNECTIONS_PER_IP = 10000;
 
 // Rate limiter config
 const messagesRateLimiter = new RateLimiterMemory({
