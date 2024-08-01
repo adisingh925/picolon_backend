@@ -23,7 +23,7 @@ jobs:
         run: docker push docker.io/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1
 
   update_on_linode:
-    name: updating docker image on linode using ssh
+    name: updating docker image on digitalocean using ssh
     needs: push_to_registry
     runs-on: ubuntu-latest
 
@@ -40,5 +40,5 @@ jobs:
                 docker rm ${{ secrets.DOCKER_REPOSITORY_NAME }};
                 docker rmi ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
                 docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
-                docker run -d --name ${{ secrets.DOCKER_REPOSITORY_NAME }} -p 443:443 -p 3000:3000 --restart unless-stopped ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
+                docker run -d --name ${{ secrets.DOCKER_REPOSITORY_NAME }} -p 443:443 --restart unless-stopped ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
                 exit
