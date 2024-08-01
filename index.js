@@ -15,7 +15,7 @@ const socketToRoom = new Map();
 
 const port = 443;
 
-// Paths to your SSL/TLS certificate files
+// Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
