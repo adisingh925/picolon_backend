@@ -13,7 +13,7 @@ const doubleVideoRooms = new Map();
 const personChoice = new Map();
 const socketToRoom = new Map();
 
-const port = 443;
+const port = 9001;
 
 // Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
