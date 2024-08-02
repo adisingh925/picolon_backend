@@ -1,135 +1,37 @@
+/* A quite detailed WebSockets example */
+
 const uWS = require('uWebSockets.js');
-const path = require('path');
-const AsyncLock = require('async-lock');
-const handleLog = require('./logging/logger');
-const lock = new AsyncLock();
-require('dotenv').config()
+const port = 9001;
 
-// Maps to store necessary data
-const doubleChatRoomWaitingPeople = [];
-const doubleVideoRoomWaitingPeople = [];
-const doubleChatRooms = new Map();
-const doubleVideoRooms = new Map();
-const personChoice = new Map();
-const socketToRoom = new Map();
-
-const port = 443;
-
-// Certificate Path SSL/TLS certificate files
-const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
-const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
-const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
-
-const app = uWS.SSLApp({
-  key_file_name: keyFilePath,
-  cert_file_name: certFilePath,
-  ca_file_name: caFilePath,
-}).ws('/', {
+const app = uWS./*SSL*/App({
+  key_file_name: 'misc/key.pem',
+  cert_file_name: 'misc/cert.pem',
+  passphrase: '1234'
+}).ws('/*', {
+  /* Options */
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 16 * 1024 * 1024,
-
-  // upgrade: (res, req, context) => {
-  //   const roomType = req.getQuery("RT");
-  //   if (roomType !== "chat" && roomType !== "video") {
-  //     res.writeStatus('403 Forbidden').end('Connection rejected');
-  //     return;
-  //   }
-
-  //   res.upgrade(
-  //     { ip: res.getRemoteAddressAsText(), roomType, id: req.getHeader('sec-websocket-key') },
-  //     req.getHeader('sec-websocket-key'),
-  //     req.getHeader('sec-websocket-protocol'),
-  //     req.getHeader('sec-websocket-extensions'),
-  //     context
-  //   );
-  // },
-
+  idleTimeout: 10,
+  /* Handlers */
   open: (ws) => {
-    console.log('WebSocket connected : ' + ws.id);
-    // reconnect(ws, ws.roomType);
+    console.log('A WebSocket connected!');
   },
-
   message: (ws, message, isBinary) => {
-    const room = socketToRoom.get(ws.id);
-    if (room) ws.publish(room, message);
+    /* Ok is false if backpressure was built up, wait for drain */
+    let ok = ws.send(message, isBinary);
   },
-
   drain: (ws) => {
-    console.log('WebSocket backpressure : ' + ws.getBufferedAmount());
+    console.log('WebSocket backpressure: ' + ws.getBufferedAmount());
   },
-
   close: (ws, code, message) => {
-    console.log('WebSocket closed : ' + ws.id);
-    handleDisconnect(ws);
+    console.log('WebSocket closed');
   }
-}).any('/ping', (res) => {
-  res.end('Pong');
+}).any('/*', (res, req) => {
+  res.end('Nothing to see here!');
 }).listen(port, (token) => {
-  handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
+  if (token) {
+    console.log('Listening to port ' + port);
+  } else {
+    console.log('Failed to listen to port ' + port);
+  }
 });
-
-const reconnect = async (ws, roomType) => {
-  try {
-    await lock.acquire("reconnect", async () => {
-      console.log("reconnect lock acquired for " + ws.id);
-
-      personChoice.set(ws.id, roomType);
-      const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
-      const peerSocket = waitingPeople.length > 0 ? waitingPeople.splice(Math.floor(Math.random() * waitingPeople.length), 1)[0] : null;
-
-      if (peerSocket) {
-        const room = `${peerSocket.id}#${ws.id}`;
-        peerSocket.subscribe(room);
-        ws.subscribe(room);
-
-        const rooms = roomType === "chat" ? doubleChatRooms : doubleVideoRooms;
-        rooms.set(room, { socket1: ws, socket2: peerSocket });
-        socketToRoom.set(ws.id, room);
-        socketToRoom.set(peerSocket.id, room);
-
-        const message = JSON.stringify({ type: 'paired', message: "You are connected to Stranger" });
-        ws.send(message);
-        peerSocket.send(message);
-
-        if (roomType === "video") {
-          ws.send(JSON.stringify({ type: 'initiator', message: "You are the initiator!" }));
-        }
-      } else {
-        waitingPeople.push(ws);
-      }
-    });
-  } catch (error) {
-    handleLog(`Error in reconnect: ${error.message}`);
-  }
-}
-
-const handleDisconnect = async (ws) => {
-  try {
-    await lock.acquire("disconnect", async () => {
-      console.log("disconnect lock acquired for " + ws.id);
-
-      const room = socketToRoom.get(ws.id);
-      const roomType = personChoice.get(ws.id);
-      personChoice.delete(ws.id);
-
-      if (room) {
-        const rooms = roomType === "chat" ? doubleChatRooms : doubleVideoRooms;
-        const { socket1, socket2 } = rooms.get(room);
-        const remainingSocket = (socket1.id === ws.id) ? socket2 : socket1;
-
-        remainingSocket.send(JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }));
-        rooms.delete(room);
-        socketToRoom.delete(ws.id);
-        socketToRoom.delete(remainingSocket.id);
-
-        reconnect(remainingSocket, roomType);
-      } else {
-        const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
-        const index = waitingPeople.indexOf(ws);
-        if (index !== -1) waitingPeople.splice(index, 1);
-      }
-    });
-  } catch (error) {
-    handleLog(`Error in disconnect: ${error.message}`);
-  }
-}
