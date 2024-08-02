@@ -13,6 +13,8 @@ const doubleVideoRooms = new Map();
 const personChoice = new Map();
 const socketToRoom = new Map();
 
+var connectedUsers = 0;
+
 const port = 80;
 
 // Certificate Path SSL/TLS certificate files
@@ -45,7 +47,7 @@ const app = uWS.App({
   },
 
   open: (ws) => {
-    console.log('WebSocket connected : ' + ws.id);
+    console.log("Connected poeple: " + ++connectedUsers + "socket id: " + ws.id);
     reconnect(ws, ws.roomType);
   },
 
@@ -59,7 +61,7 @@ const app = uWS.App({
   },
 
   close: (ws, code, message) => {
-    console.log('WebSocket closed : ' + ws.id);
+    console.log("Connected poeple: " + --connectedUsers + "socket id: " + ws.id);
     handleDisconnect(ws);
   }
 }).any('/ping', (res) => {
