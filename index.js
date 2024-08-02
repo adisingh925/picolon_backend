@@ -13,7 +13,7 @@ const doubleVideoRooms = new Map();
 const personChoice = new Map();
 const socketToRoom = new Map();
 
-const port = 9001;
+const port = 80;
 
 // Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
@@ -24,29 +24,29 @@ const app = uWS.App({
   key_file_name: 'misc/key.pem',
   cert_file_name: 'misc/cert.pem',
   passphrase: '1234'
-}).ws('/*', {
+}).ws('/', {
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 16 * 1024 * 1024,
 
-  // upgrade: (res, req, context) => {
-  //   const roomType = req.getQuery("RT");
-  //   if (roomType !== "chat" && roomType !== "video") {
-  //     res.writeStatus('403 Forbidden').end('Connection rejected');
-  //     return;
-  //   }
+  upgrade: (res, req, context) => {
+    const roomType = req.getQuery("RT");
+    if (roomType !== "chat" && roomType !== "video") {
+      res.writeStatus('403 Forbidden').end('Connection rejected');
+      return;
+    }
 
-  //   res.upgrade(
-  //     { ip: res.getRemoteAddressAsText(), roomType, id: req.getHeader('sec-websocket-key') },
-  //     req.getHeader('sec-websocket-key'),
-  //     req.getHeader('sec-websocket-protocol'),
-  //     req.getHeader('sec-websocket-extensions'),
-  //     context
-  //   );
-  // },
+    res.upgrade(
+      { ip: res.getRemoteAddressAsText(), roomType, id: req.getHeader('sec-websocket-key') },
+      req.getHeader('sec-websocket-key'),
+      req.getHeader('sec-websocket-protocol'),
+      req.getHeader('sec-websocket-extensions'),
+      context
+    );
+  },
 
   open: (ws) => {
     console.log('WebSocket connected : ' + ws.id);
-    // reconnect(ws, ws.roomType);
+    reconnect(ws, ws.roomType);
   },
 
   message: (ws, message, isBinary) => {
