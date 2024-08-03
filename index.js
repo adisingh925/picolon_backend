@@ -28,7 +28,7 @@ const app = uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
   ca_file_name: caFilePath,
-}).ws('/', {
+}).ws('/*', {
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 1048576,
   maxLifetime: 0,
