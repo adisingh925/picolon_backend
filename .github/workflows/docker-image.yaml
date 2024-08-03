@@ -24,4 +24,4 @@ jobs:
             cd ${{ secrets.FOLDER_NAME }};
             git pull https://${{ secrets.G_USERNAME }}:${{ secrets.G_TOKEN }}@github.com/${{ secrets.G_USERNAME }}/${{ secrets.FOLDER_NAME }}.git;
             node index.js;
-            exit
+            exit;
