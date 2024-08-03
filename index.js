@@ -32,6 +32,7 @@ const app = uWS.SSLApp({
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 1048576,
   maxLifetime: 0,
+  idleTimeout: 0,
 
   upgrade: (res, req, context) => {
     const roomType = req.getQuery("RT");
