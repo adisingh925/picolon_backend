@@ -34,22 +34,22 @@ const app = uWS.SSLApp({
   maxLifetime: 0,
   idleTimeout: 0,
 
-  upgrade: (res, req, context) => {
-    console.log("upgrading");
-    const roomType = req.getQuery("RT");
-    if (roomType !== "chat" && roomType !== "video") {
-      res.writeStatus('403 Forbidden').end('Connection rejected');
-      return;
-    }
+  // upgrade: (res, req, context) => {
+  //   console.log("upgrading");
+  //   const roomType = req.getQuery("RT");
+  //   if (roomType !== "chat" && roomType !== "video") {
+  //     res.writeStatus('403 Forbidden').end('Connection rejected');
+  //     return;
+  //   }
 
-    res.upgrade(
-      { ip: res.getRemoteAddressAsText(), roomType, id: req.getHeader('sec-websocket-key') },
-      req.getHeader('sec-websocket-key'),
-      req.getHeader('sec-websocket-protocol'),
-      req.getHeader('sec-websocket-extensions'),
-      context
-    );
-  },
+  //   res.upgrade(
+  //     { ip: res.getRemoteAddressAsText(), roomType, id: req.getHeader('sec-websocket-key') },
+  //     req.getHeader('sec-websocket-key'),
+  //     req.getHeader('sec-websocket-protocol'),
+  //     req.getHeader('sec-websocket-extensions'),
+  //     context
+  //   );
+  // },
 
   open: (ws) => {
     console.log("WebSocket connected : " + ws.id);
