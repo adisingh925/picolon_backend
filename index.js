@@ -35,6 +35,7 @@ const app = uWS.SSLApp({
   idleTimeout: 0,
 
   upgrade: (res, req, context) => {
+    console.log("upgrading");
     const roomType = req.getQuery("RT");
     if (roomType !== "chat" && roomType !== "video") {
       res.writeStatus('403 Forbidden').end('Connection rejected');
