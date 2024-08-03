@@ -25,4 +25,4 @@ jobs:
             git pull https://${{ secrets.G_USERNAME }}:${{ secrets.G_TOKEN }}@github.com/${{ secrets.G_USERNAME }}/${{ secrets.FOLDER_NAME }}.git;
             pkill -f 'node index.js';
             ulimit -Sn 1048576;
-            nohup node index.js > output.log 2>&1 &
+            node index.js & exit
