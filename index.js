@@ -13,17 +13,17 @@ const doubleVideoRooms = new Map();
 const personChoice = new Map();
 const socketToRoom = new Map();
 
-const port = 443;
+const port = 80;
 
 // Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
 
-const app = uWS.SSLApp({
-  key_file_name: 'misc/key.pem',
-  cert_file_name: 'misc/cert.pem',
-  passphrase: '1234'
+const app = uWS.App({
+  key_file_name: keyFilePath,
+  cert_file_name: certFilePath,
+  ca_file_name: caFilePath,
 }).ws('/', {
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 16 * 1024 * 1024,
