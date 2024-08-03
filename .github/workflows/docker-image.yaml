@@ -26,4 +26,4 @@ jobs:
             pkill -f 'node index.js';
             ulimit -Sn 1048576;
             nohup node index.js > output.log 2>&1 &;
-            exit;
+            exit
