@@ -22,9 +22,8 @@ const port = 443;
 // Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
-const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
 
-const app = uWS.SSLApp({
+uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
 }).ws('/', {
@@ -34,7 +33,6 @@ const app = uWS.SSLApp({
   idleTimeout: 0,
 
   upgrade: (res, req, context) => {
-    console.log("upgrading");
     const roomType = req.getQuery("RT");
     if (roomType !== "chat" && roomType !== "video") {
       res.writeStatus('403 Forbidden').end('Connection rejected');
@@ -78,7 +76,7 @@ const reconnect = async (ws, roomType) => {
   try {
     lock.acquire("reconnect", async (done) => {
       console.log("reconnect lock acquired for " + ws.id);
-      ++connections;
+      connections++;
 
       personChoice.set(ws.id, roomType);
       const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
@@ -109,7 +107,7 @@ const reconnect = async (ws, roomType) => {
 
       done();
     }, function (err, ret) {
-      handleLog("reconnect lock released for " + ws.id);
+      console.log("reconnect lock released for " + ws.id);
     }, {});
   } catch (error) {
     handleLog(`Error in reconnect: ${error.message}`);
@@ -120,7 +118,7 @@ const handleDisconnect = async (ws) => {
   try {
     lock.acquire("disconnect", async (done) => {
       console.log("disconnect lock acquired for " + ws.id);
-      --connections;
+      connections--;
 
       const room = socketToRoom.get(ws.id);
       const roomType = personChoice.get(ws.id);
@@ -146,7 +144,7 @@ const handleDisconnect = async (ws) => {
 
       done();
     }, function (err, ret) {
-      handleLog("disconnect lock released for " + ws.id);
+      console.log("disconnect lock released for " + ws.id);
     }, {});
   } catch (error) {
     handleLog(`Error in disconnect: ${error.message}`);

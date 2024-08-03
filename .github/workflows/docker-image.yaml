@@ -7,24 +7,8 @@ on:
     branches: ["main"]
 
 jobs:
-  push_to_registry:
-    name: building and pushing docker image to dockerhub
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-      - name: Build the Docker image
-        run: docker build . --file Dockerfile --tag ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1
-
-      - name: docker login
-        run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: docker push
-        run: docker push docker.io/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1
-
-  update_on_linode:
-    name: updating docker image on digitalocean using ssh
-    needs: push_to_registry
+  update_on_vm:
+    name: updating server on digitalocean using ssh
     runs-on: ubuntu-latest
 
     steps:
@@ -36,9 +20,7 @@ jobs:
           password: ${{ secrets.PASSWORD }}
           port: ${{ secrets.PORT }}
           script: 
-                docker stop ${{ secrets.DOCKER_REPOSITORY_NAME }};
-                docker rm ${{ secrets.DOCKER_REPOSITORY_NAME }};
-                docker rmi ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
-                docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
-                docker run -d --name ${{ secrets.DOCKER_REPOSITORY_NAME }} -p 443:443 --restart unless-stopped ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPOSITORY_NAME }}:v1;
-                exit
+            git clone ${{ secrets.REPOSITORY_PATH}};
+            cd ${{ secrets.FOLDER_NAME }};
+            node index.js;
+            exit
