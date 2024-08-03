@@ -13,8 +13,10 @@ const doubleVideoRooms = new Map();
 const personChoice = new Map();
 const socketToRoom = new Map();
 
+// Number of active connections
 var connections = 0;
 
+// Port to listen
 const port = 443;
 
 // Certificate Path SSL/TLS certificate files
@@ -28,7 +30,7 @@ const app = uWS.SSLApp({
   ca_file_name: caFilePath,
 }).ws('/', {
   compression: uWS.SHARED_COMPRESSOR,
-  maxPayloadLength: 16 * 1024 * 1024,
+  maxPayloadLength: 1048576,
   maxLifetime: 0,
 
   upgrade: (res, req, context) => {
@@ -102,8 +104,9 @@ const reconnect = async (ws, roomType) => {
         done();
       } else {
         waitingPeople.push(ws);
-        done();
       }
+
+      done();
     }, function (err, ret) {
       handleLog("reconnect lock released for " + ws.id);
     }, {});
