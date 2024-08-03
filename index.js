@@ -15,20 +15,21 @@ const socketToRoom = new Map();
 
 var connections = 0;
 
-const port = 80;
+const port = 443;
 
 // Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
 
-const app = uWS.App({
+const app = uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
   ca_file_name: caFilePath,
 }).ws('/', {
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 16 * 1024 * 1024,
+  maxLifetime: 0,
 
   upgrade: (res, req, context) => {
     const roomType = req.getQuery("RT");
@@ -47,7 +48,7 @@ const app = uWS.App({
   },
 
   open: (ws) => {
-    console.log("WebSocket connected : " + ws.id + " connections: " + ++connections);
+    console.log("WebSocket connected : " + ws.id);
     reconnect(ws, ws.roomType);
   },
 
@@ -61,11 +62,9 @@ const app = uWS.App({
   },
 
   close: (ws, code, message) => {
-    console.log("WebSocket disconnected : " + ws.id + " connections: " + --connections);
+    console.log("WebSocket disconnected : " + ws.id);
     handleDisconnect(ws);
   }
-}).get('/ping', (res) => {
-  res.end('Pong');
 }).get('/connections', (res) => {
   res.end(connections.toString());
 }).listen(port, (token) => {
@@ -74,8 +73,9 @@ const app = uWS.App({
 
 const reconnect = async (ws, roomType) => {
   try {
-    await lock.acquire("reconnect", async () => {
+    lock.acquire("reconnect", async (done) => {
       console.log("reconnect lock acquired for " + ws.id);
+      ++connections;
 
       personChoice.set(ws.id, roomType);
       const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
@@ -98,10 +98,15 @@ const reconnect = async (ws, roomType) => {
         if (roomType === "video") {
           ws.send(JSON.stringify({ type: 'initiator', message: "You are the initiator!" }));
         }
+
+        done();
       } else {
         waitingPeople.push(ws);
+        done();
       }
-    });
+    }, function (err, ret) {
+      handleLog("reconnect lock released for " + ws.id);
+    }, {});
   } catch (error) {
     handleLog(`Error in reconnect: ${error.message}`);
   }
@@ -109,8 +114,9 @@ const reconnect = async (ws, roomType) => {
 
 const handleDisconnect = async (ws) => {
   try {
-    await lock.acquire("disconnect", async () => {
+    lock.acquire("disconnect", async (done) => {
       console.log("disconnect lock acquired for " + ws.id);
+      --connections;
 
       const room = socketToRoom.get(ws.id);
       const roomType = personChoice.get(ws.id);
@@ -126,13 +132,18 @@ const handleDisconnect = async (ws) => {
         socketToRoom.delete(ws.id);
         socketToRoom.delete(remainingSocket.id);
 
+        done();
         reconnect(remainingSocket, roomType);
       } else {
         const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
         const index = waitingPeople.indexOf(ws);
         if (index !== -1) waitingPeople.splice(index, 1);
       }
-    });
+
+      done();
+    }, function (err, ret) {
+      handleLog("disconnect lock released for " + ws.id);
+    }, {});
   } catch (error) {
     handleLog(`Error in disconnect: ${error.message}`);
   }
