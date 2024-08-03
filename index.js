@@ -27,7 +27,6 @@ const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
 const app = uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
-  ca_file_name: caFilePath,
 }).ws('/', {
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 1048576,
