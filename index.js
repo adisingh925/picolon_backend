@@ -17,14 +17,14 @@ const socketToRoom = new Map();
 var connections = 0;
 
 // Port to listen
-const port = 443;
+const port = 80;
 
 // Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
 
-const app = uWS.SSLApp({
+const app = uWS.App({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
   ca_file_name: caFilePath,
