@@ -23,5 +23,5 @@ jobs:
             git clone ${{ secrets.REPOSITORY_PATH}};
             cd ${{ secrets.FOLDER_NAME }};
             git pull https://${{ secrets.G_USERNAME }}:${{ secrets.G_TOKEN }}@github.com/${{ secrets.G_USERNAME }}/${{ secrets.FOLDER_NAME }}.git;
-            node index.js;
+            nohup node index.js > output.log 2>&1 &;
             exit;
