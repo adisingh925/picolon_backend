@@ -12,6 +12,7 @@ const doubleChatRooms = new Map();
 const doubleVideoRooms = new Map();
 const personChoice = new Map();
 const socketToRoom = new Map();
+const connectionsPerIp = new Map();
 
 // Number of active connections
 var connections = 0;
@@ -33,6 +34,17 @@ uWS.SSLApp({
   idleTimeout: 0,
 
   upgrade: (res, req, context) => {
+    const decoder = new TextDecoder('utf-8');
+    const address = decoder.decode(res.getRemoteAddressAsText());
+
+    const ipCount = connectionsPerIp.get(address) || 0;
+    if (ipCount >= 3) {
+      res.writeStatus('403 Forbidden').end('Connection limit exceeded');
+      return;
+    }else{
+      connectionsPerIp.set(address, ipCount + 1);
+    }
+
     const roomType = req.getQuery("RT");
     if (roomType !== "chat" && roomType !== "video") {
       res.writeStatus('403 Forbidden').end('Connection rejected');
@@ -40,7 +52,7 @@ uWS.SSLApp({
     }
 
     res.upgrade(
-      { ip: res.getRemoteAddressAsText(), roomType, id: req.getHeader('sec-websocket-key') },
+      { ip: address, roomType, id: req.getHeader('sec-websocket-key') },
       req.getHeader('sec-websocket-key'),
       req.getHeader('sec-websocket-protocol'),
       req.getHeader('sec-websocket-extensions'),
@@ -64,6 +76,15 @@ uWS.SSLApp({
 
   close: (ws, code, message) => {
     console.log("WebSocket disconnected : " + ws.id);
+
+    const ip = ws.ip;
+    const currentCount = connectionsPerIp.get(ip);
+    if (currentCount > 1) {
+      connectionsPerIp.set(ip, currentCount - 1);
+    } else {
+      connectionsPerIp.delete(ip);
+    }
+
     handleDisconnect(ws);
   }
 }).get('/connections', (res) => {
