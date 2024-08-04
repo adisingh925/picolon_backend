@@ -103,7 +103,17 @@ uWS.SSLApp({
 
     handleDisconnect(ws);
   }
-}).get('/connections', (res) => {
+}).get('/connections', (res, req) => {
+  // Get the origin of the request
+  const origin = req.getHeader('origin');
+
+  // Set CORS headers conditionally
+  if (origin === 'http://localhost' || origin === 'https://picolon.com') {
+    res.writeHeader('Access-Control-Allow-Origin', origin);
+  }
+
+  res.writeHeader('Access-Control-Allow-Methods', 'GET');
+  res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.end(connections.toString());
 }).listen(port, (token) => {
   handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
