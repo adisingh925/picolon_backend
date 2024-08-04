@@ -4,6 +4,7 @@ const AsyncLock = require('async-lock');
 const handleLog = require('./logging/logger');
 const lock = new AsyncLock();
 require('dotenv').config()
+const { RateLimiterMemory } = require("rate-limiter-flexible");
 
 // Maps to store necessary data
 const doubleChatRoomWaitingPeople = [];
@@ -24,6 +25,15 @@ const port = 443;
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 
+// Options for rate limiter
+const opts = {
+  points: 50, // starting points
+  duration: 1, // Per second
+  blockDuration: 3, // block for 3 seconds if more than points consumed
+};
+
+const rateLimiter = new RateLimiterMemory(opts);
+
 uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
@@ -37,11 +47,12 @@ uWS.SSLApp({
     const decoder = new TextDecoder('utf-8');
     const address = decoder.decode(res.getRemoteAddressAsText());
 
+    // Check if the IP has more than 3 connections
     const ipCount = connectionsPerIp.get(address) || 0;
     if (ipCount >= 3) {
       res.writeStatus('403 Forbidden').end('Connection limit exceeded');
       return;
-    }else{
+    } else {
       connectionsPerIp.set(address, ipCount + 1);
     }
 
@@ -66,8 +77,12 @@ uWS.SSLApp({
   },
 
   message: (ws, message, isBinary) => {
-    const room = socketToRoom.get(ws.id);
-    if (room) ws.publish(room, message);
+    rateLimiter.consume(ws.id, 2).then((rateLimiterRes) => {
+      const room = socketToRoom.get(ws.id);
+      if (room) ws.publish(room, message);
+    }).catch((rateLimiterRes) => {
+      console.log("Rate limit exceeded for " + ws.id);
+    });
   },
 
   drain: (ws) => {
@@ -77,6 +92,7 @@ uWS.SSLApp({
   close: (ws, code, message) => {
     console.log("WebSocket disconnected : " + ws.id);
 
+    // Decrease the connection count for IP
     const ip = ws.ip;
     const currentCount = connectionsPerIp.get(ip);
     if (currentCount > 1) {
