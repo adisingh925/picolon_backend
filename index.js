@@ -73,7 +73,7 @@ uWS.SSLApp({
 
   open: (ws) => {
     console.log("WebSocket connected : " + ws.id);
-    reconnect(ws, ws.roomType);
+    reconnect(ws, ws.roomType, true);
   },
 
   message: (ws, message, isBinary) => {
@@ -108,7 +108,7 @@ uWS.SSLApp({
   const origin = req.getHeader('origin');
 
   // Set CORS headers conditionally
-  if (origin === 'http://localhost' || origin === 'https://picolon.com') {
+  if (origin === 'http://localhost:3000' || origin === 'https://picolon.com') {
     res.writeHeader('Access-Control-Allow-Origin', origin);
   }
 
@@ -119,11 +119,14 @@ uWS.SSLApp({
   handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
 });
 
-const reconnect = async (ws, roomType) => {
+const reconnect = async (ws, roomType, isConnected = false) => {
   try {
     lock.acquire("reconnect", async (done) => {
       console.log("reconnect lock acquired for " + ws.id);
-      connections++;
+
+      if (isConnected) {
+        connections++;
+      }
 
       personChoice.set(ws.id, roomType);
       const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
@@ -165,7 +168,7 @@ const handleDisconnect = async (ws) => {
   try {
     lock.acquire("disconnect", async (done) => {
       console.log("disconnect lock acquired for " + ws.id);
-      connections--;
+      console.log("Connections Remaining: " + --connections);
 
       const room = socketToRoom.get(ws.id);
       const roomType = personChoice.get(ws.id);
