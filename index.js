@@ -41,7 +41,7 @@ uWS.SSLApp({
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 1048576,
   maxLifetime: 0,
-  idleTimeout: 0,
+  idleTimeout: 600,
 
   upgrade: (res, req, context) => {
     const decoder = new TextDecoder('utf-8');
