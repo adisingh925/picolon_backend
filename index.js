@@ -27,9 +27,9 @@ const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 
 // Options for rate limiter
 const opts = {
-  points: 50, // starting points
-  duration: 1, // Per second
-  blockDuration: 3, // block for 3 seconds if more than points consumed
+  points: 5, 
+  duration: 1, 
+  blockDuration: 3, 
 };
 
 const rateLimiter = new RateLimiterMemory(opts);
@@ -77,7 +77,7 @@ uWS.SSLApp({
   },
 
   message: (ws, message, isBinary) => {
-    rateLimiter.consume(ws.id, 1).then((rateLimiterRes) => {
+    rateLimiter.consume(ws.id, 0).then((rateLimiterRes) => {
       const room = socketToRoom.get(ws.id);
       if (room) ws.publish(room, message);
     }).catch((rateLimiterRes) => {
