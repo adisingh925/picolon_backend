@@ -5,15 +5,30 @@ const handleLog = require('./logging/logger');
 const lock = new AsyncLock();
 require('dotenv').config()
 const { RateLimiterMemory } = require("rate-limiter-flexible");
+const { v4: uuidv4 } = require('uuid');
+
+//constants
+const PRIVATE_TEXT_CHAT_DUO = '0';
+const PRIVATE_VIDEO_CHAT_DUO = '1';
+const PUBLIC_TEXT_CHAT_MULTI = '2';
+const CONNECTION_LIMIT_EXCEEDED = 'connection_limit_exceeded';
+const RATE_LIMIT_EXCEEDED = 'rate_limit_exceeded';
+const CONNECTION_REJECTED = 'connection_rejected';
+const STRANGER_DISCONNECTED_FROM_THE_ROOM = 'stranger_disconnected_from_the_room';
+const YOU_ARE_CONNECTED_TO_THE_ROOM = 'you_are_connected_to_the_room';
+const STRANGER_CONNECTED_TO_THE_ROOM = 'stranger_connected_to_the_room';
+const ROOM_NOT_FOUND = 'room_not_found';
 
 // Maps to store necessary data
 const doubleChatRoomWaitingPeople = [];
 const doubleVideoRoomWaitingPeople = [];
-const doubleChatRooms = new Map();
-const doubleVideoRooms = new Map();
-const personChoice = new Map();
-const socketToRoom = new Map();
+const textChatDuoRoomIdToSockets = new Map();
+const videoChatDuoRoomIdToSockets = new Map();
+const socketIdToRoomType = new Map();
+const socketIdToRoomId = new Map();
 const connectionsPerIp = new Map();
+const textChatMultiRoomIdToSockets = new Map();
+const roomIdToRoomName = new Map();
 
 // Number of active connections
 var connections = 0;
@@ -34,6 +49,9 @@ const opts = {
 
 const rateLimiter = new RateLimiterMemory(opts);
 
+// Allowed roomId types
+const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI];
+
 uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
@@ -41,29 +59,44 @@ uWS.SSLApp({
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 1048576,
   maxLifetime: 0,
-  idleTimeout: 3600,
+  idleTimeout: 0,
 
   upgrade: (res, req, context) => {
-    const decoder = new TextDecoder('utf-8');
-    const address = decoder.decode(res.getRemoteAddressAsText());
+    const address = convertArrayBufferToString(res.getRemoteAddressAsText());
 
     // Check if the IP has more than 3 connections
     const ipCount = connectionsPerIp.get(address) || 0;
     if (ipCount >= 3) {
-      res.writeStatus('403 Forbidden').end('Connection limit exceeded');
+      res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
       return;
     } else {
       connectionsPerIp.set(address, ipCount + 1);
     }
 
+    // Sanitize and validate roomType
     const roomType = req.getQuery("RT");
-    if (roomType !== "chat" && roomType !== "video") {
-      res.writeStatus('403 Forbidden').end('Connection rejected');
+    if (!allowedRoomTypes.includes(roomType)) {
+      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
       return;
     }
 
+    // Sanitize and validate roomName
+    const roomName = req.getQuery("RN");
+    if (roomName && typeof roomName !== 'string') {
+      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+      return;
+    }
+
+    // Sanitize and validate roomId
+    const roomId = req.getQuery("RID");
+    if (roomId && typeof roomId !== 'string') {
+      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+      return;
+    }
+
+    // Upgrade WebSocket connection
     res.upgrade(
-      { ip: address, roomType, id: req.getHeader('sec-websocket-key') },
+      { ip: address, roomType, roomName, roomId, id: req.getHeader('sec-websocket-key') },
       req.getHeader('sec-websocket-key'),
       req.getHeader('sec-websocket-protocol'),
       req.getHeader('sec-websocket-extensions'),
@@ -71,18 +104,22 @@ uWS.SSLApp({
     );
   },
 
+  subscription: (ws, roomId) => {
+    console.log(`WebSocket (${ws.id}) subscribed to roomId : ` + convertArrayBufferToString(roomId));
+  },
+
   open: (ws) => {
     console.log("WebSocket connected : " + ws.id);
-    reconnect(ws, ws.roomType, true);
+    reconnect(ws, true);
   },
 
   message: (ws, message, isBinary) => {
     rateLimiter.consume(ws.id, 1).then((rateLimiterRes) => {
-      const room = socketToRoom.get(ws.id);
-      if (room) ws.publish(room, message);
+      const roomId = socketIdToRoomId.get(ws.id);
+      if (roomId) ws.publish(roomId, message);
     }).catch((rateLimiterRes) => {
       console.log("Rate limit exceeded for " + ws.id);
-      ws.send(JSON.stringify({ type: 'rate_limit', message: "Rate limit exceeded" }));
+      ws.send(JSON.stringify({ type: RATE_LIMIT_EXCEEDED }));
     });
   },
 
@@ -120,7 +157,7 @@ uWS.SSLApp({
   handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
 });
 
-const reconnect = async (ws, roomType, isConnected = false) => {
+const reconnect = async (ws, isConnected = false) => {
   try {
     lock.acquire("reconnect", async (done) => {
       console.log("reconnect lock acquired for " + ws.id);
@@ -129,31 +166,100 @@ const reconnect = async (ws, roomType, isConnected = false) => {
         connections++;
       }
 
-      personChoice.set(ws.id, roomType);
-      const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
-      const peerSocket = waitingPeople.length > 0 ? waitingPeople.splice(Math.floor(Math.random() * waitingPeople.length), 1)[0] : null;
+      const roomType = ws.roomType;
+      socketIdToRoomType.set(ws.id, roomType);
 
-      if (peerSocket) {
-        const room = `${peerSocket.id}#${ws.id}`;
-        peerSocket.subscribe(room);
-        ws.subscribe(room);
+      if (roomType === PUBLIC_TEXT_CHAT_MULTI) {
 
-        const rooms = roomType === "chat" ? doubleChatRooms : doubleVideoRooms;
-        rooms.set(room, { socket1: ws, socket2: peerSocket });
-        socketToRoom.set(ws.id, room);
-        socketToRoom.set(peerSocket.id, room);
+        // Check if the person is already in a roomId
+        const roomId = socketIdToRoomId.get(ws.id);
 
-        const message = JSON.stringify({ type: 'paired', message: "You are connected to Stranger" });
-        ws.send(message);
-        peerSocket.send(message);
+        if (roomId) {
+          // Unsubscribe from the current roomId if present
+          ws.unsubscribe(roomId);
 
-        if (roomType === "video") {
-          ws.send(JSON.stringify({ type: 'initiator', message: "You are the initiator!" }));
+          // send message to roomId that the peer is disconnected
+          ws.publish(roomId, JSON.stringify({ type: STRANGER_DISCONNECTED_FROM_THE_ROOM }));
+
+          // Remove the user from the chat roomId map if present
+          const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
+
+          if (socketsInRoom) {
+            if (socketsInRoom.has(ws)) {
+              socketsInRoom.delete(ws);
+
+              // If the roomId is empty, delete the roomId else update the roomId
+              if (socketsInRoom.size === 0) {
+                textChatMultiRoomIdToSockets.delete(roomId);
+                roomIdToRoomName.delete(roomId);
+              } else {
+                textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
+              }
+            }
+          }
         }
 
-        done();
+        if (ws.roomName) {
+          const roomId = uuidv4();
+
+          // Subscribe to the new roomId
+          ws.subscribe(roomId);
+
+          socketIdToRoomId.set(ws.id, roomId);
+          textChatMultiRoomIdToSockets.set(roomId, new Set([ws]));
+          roomIdToRoomName.set(roomId, { roomName: ws.roomName, createTime: new Date().getTime(), connections: 1 });
+        } else if (ws.roomId) {
+          const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
+
+          if (socketsInRoom) {
+            socketsInRoom.add(ws);
+
+            // Subscribe to the roomId
+            ws.subscribe(ws.roomId);
+
+            // Increase the connection count for the roomId
+            const roomData = roomIdToRoomName.get(ws.roomId);
+            roomData.connections++;
+
+            // Send message to the current user that he is connected to the roomId
+            ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomId: ws.roomId, roomData }));
+
+            // Send message to all the people in the roomId except the current user
+            ws.publish(ws.roomId, JSON.stringify({
+              type: STRANGER_CONNECTED_TO_THE_ROOM,
+            }), false /* isBinary */, true /* excludeSelf */);
+
+            socketIdToRoomId.set(ws.id, ws.roomId);
+            textChatMultiRoomIdToSockets.set(ws.roomId, socketsInRoom);
+          } else {
+            ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
+            ws.close();
+          }
+        }
       } else {
-        waitingPeople.push(ws);
+        const waitingPeople = roomType === PRIVATE_TEXT_CHAT_DUO ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
+        const peerSocket = waitingPeople.length > 0 ? waitingPeople.splice(Math.floor(Math.random() * waitingPeople.length), 1)[0] : null;
+
+        if (peerSocket) {
+          const roomId = uuidv4();
+          peerSocket.subscribe(roomId);
+          ws.subscribe(roomId);
+
+          const rooms = roomType === PRIVATE_TEXT_CHAT_DUO ? textChatDuoRoomIdToSockets : videoChatDuoRoomIdToSockets;
+          rooms.set(roomId, { socket1: ws, socket2: peerSocket });
+          socketIdToRoomId.set(ws.id, roomId);
+          socketIdToRoomId.set(peerSocket.id, roomId);
+
+          const message = JSON.stringify({ type: 'paired', message: "You are connected to Stranger" });
+          ws.send(message);
+          peerSocket.send(message);
+
+          if (roomType === PRIVATE_VIDEO_CHAT_DUO) {
+            ws.send(JSON.stringify({ type: 'initiator', message: "You are the initiator!" }));
+          }
+        } else {
+          waitingPeople.push(ws);
+        }
       }
 
       done();
@@ -171,26 +277,55 @@ const handleDisconnect = async (ws) => {
       console.log("disconnect lock acquired for " + ws.id);
       console.log("Connections Remaining: " + --connections);
 
-      const room = socketToRoom.get(ws.id);
-      const roomType = personChoice.get(ws.id);
-      personChoice.delete(ws.id);
+      const roomId = socketIdToRoomId.get(ws.id);
+      const roomType = socketIdToRoomType.get(ws.id);
+      socketIdToRoomType.delete(ws.id);
 
-      if (room) {
-        const rooms = roomType === "chat" ? doubleChatRooms : doubleVideoRooms;
-        const { socket1, socket2 } = rooms.get(room);
-        const remainingSocket = (socket1.id === ws.id) ? socket2 : socket1;
+      if (roomType === PUBLIC_TEXT_CHAT_MULTI) {
+        if (roomId) {
+          const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
 
-        remainingSocket.send(JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }));
-        rooms.delete(room);
-        socketToRoom.delete(ws.id);
-        socketToRoom.delete(remainingSocket.id);
+          if (socketsInRoom) {
+            socketsInRoom.delete(ws);
 
-        done();
-        reconnect(remainingSocket, roomType);
+            if (socketsInRoom.size === 0) {
+              textChatMultiRoomIdToSockets.delete(roomId);
+              roomIdToRoomName.delete(roomId);
+            } else {
+              // Decrease the connection count for the roomId
+              roomData = roomIdToRoomName.get(roomId);
+              roomData.connections--;
+              roomIdToRoomName.set(roomId, roomData);
+
+              textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
+              socketsInRoom.forEach(socket => {
+                socket.send(JSON.stringify({
+                  type: STRANGER_DISCONNECTED_FROM_THE_ROOM,
+                }));
+              });
+            }
+          }
+
+          socketIdToRoomId.delete(ws.id);
+        }
       } else {
-        const waitingPeople = roomType === "chat" ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
-        const index = waitingPeople.indexOf(ws);
-        if (index !== -1) waitingPeople.splice(index, 1);
+        if (roomId) {
+          const rooms = roomType === PRIVATE_TEXT_CHAT_DUO ? textChatDuoRoomIdToSockets : videoChatDuoRoomIdToSockets;
+          const { socket1, socket2 } = rooms.get(roomId);
+          const remainingSocket = (socket1.id === ws.id) ? socket2 : socket1;
+
+          remainingSocket.send(JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }));
+          rooms.delete(roomId);
+          socketIdToRoomId.delete(ws.id);
+          socketIdToRoomId.delete(remainingSocket.id);
+
+          done();
+          reconnect(remainingSocket, roomType);
+        } else {
+          const waitingPeople = roomType === PRIVATE_TEXT_CHAT_DUO ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
+          const index = waitingPeople.indexOf(ws);
+          if (index !== -1) waitingPeople.splice(index, 1);
+        }
       }
 
       done();
@@ -200,4 +335,9 @@ const handleDisconnect = async (ws) => {
   } catch (error) {
     handleLog(`Error in disconnect: ${error.message}`);
   }
+}
+
+const convertArrayBufferToString = (arrayBuffer) => {
+  const decoder = new TextDecoder();
+  return decoder.decode(arrayBuffer);
 }
