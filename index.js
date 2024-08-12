@@ -141,7 +141,7 @@ uWS.SSLApp({
 
     handleDisconnect(ws);
   }
-}).get('/connections', (res, req) => {
+}).get('/api/v1/connections', (res, req) => {
   // Get the origin of the request
   const origin = req.getHeader('origin');
 
@@ -153,6 +153,17 @@ uWS.SSLApp({
   res.writeHeader('Access-Control-Allow-Methods', 'GET');
   res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.end(connections.toString());
+}).get("/api/v1/public-text-chat-rooms", (res, req) => {
+  // Get the origin of the request
+  const origin = req.getHeader('origin');
+
+  // Set CORS headers conditionally
+  if (origin === 'http://localhost:3000' || origin === 'https://picolon.com') {
+    res.writeHeader('Access-Control-Allow-Origin', origin);
+  }
+
+  const rooms = Array.from(roomIdToRoomName.values());
+  res.end(JSON.stringify(rooms));
 }).listen(port, (token) => {
   handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
 });
