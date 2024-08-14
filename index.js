@@ -11,6 +11,8 @@ const { v4: uuidv4 } = require('uuid');
 const PRIVATE_TEXT_CHAT_DUO = '0';
 const PRIVATE_VIDEO_CHAT_DUO = '1';
 const PUBLIC_TEXT_CHAT_MULTI = '2';
+
+//server broadcast messages
 const CONNECTION_LIMIT_EXCEEDED = 'connection_limit_exceeded';
 const RATE_LIMIT_EXCEEDED = 'rate_limit_exceeded';
 const CONNECTION_REJECTED = 'connection_rejected';
@@ -28,7 +30,7 @@ const socketIdToRoomType = new Map();
 const socketIdToRoomId = new Map();
 const connectionsPerIp = new Map();
 const textChatMultiRoomIdToSockets = new Map();
-const roomIdToRoomName = new Map();
+const roomIdToRoomData = new Map();
 
 // Number of active connections
 var connections = 0;
@@ -162,7 +164,7 @@ uWS.SSLApp({
     res.writeHeader('Access-Control-Allow-Origin', origin);
   }
 
-  const rooms = Array.from(roomIdToRoomName.values());
+  const rooms = Array.from(roomIdToRoomData.values());
   res.end(JSON.stringify(rooms));
 }).listen(port, (token) => {
   handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
@@ -202,7 +204,7 @@ const reconnect = async (ws, isConnected = false) => {
               // If the roomId is empty, delete the roomId else update the roomId
               if (socketsInRoom.size === 0) {
                 textChatMultiRoomIdToSockets.delete(roomId);
-                roomIdToRoomName.delete(roomId);
+                roomIdToRoomData.delete(roomId);
               } else {
                 textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
               }
@@ -218,7 +220,7 @@ const reconnect = async (ws, isConnected = false) => {
 
           socketIdToRoomId.set(ws.id, roomId);
           textChatMultiRoomIdToSockets.set(roomId, new Set([ws]));
-          roomIdToRoomName.set(roomId, { roomName: ws.roomName, createTime: new Date().getTime(), connections: 1 });
+          roomIdToRoomData.set(roomId, { roomName: ws.roomName, createTime: new Date().getTime(), roomId, connections: 1 });
         } else if (ws.roomId) {
           const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
 
@@ -229,7 +231,7 @@ const reconnect = async (ws, isConnected = false) => {
             ws.subscribe(ws.roomId);
 
             // Increase the connection count for the roomId
-            const roomData = roomIdToRoomName.get(ws.roomId);
+            const roomData = roomIdToRoomData.get(ws.roomId);
             roomData.connections++;
 
             // Send message to the current user that he is connected to the roomId
@@ -301,12 +303,12 @@ const handleDisconnect = async (ws) => {
 
             if (socketsInRoom.size === 0) {
               textChatMultiRoomIdToSockets.delete(roomId);
-              roomIdToRoomName.delete(roomId);
+              roomIdToRoomData.delete(roomId);
             } else {
               // Decrease the connection count for the roomId
-              roomData = roomIdToRoomName.get(roomId);
+              roomData = roomIdToRoomData.get(roomId);
               roomData.connections--;
-              roomIdToRoomName.set(roomId, roomData);
+              roomIdToRoomData.set(roomId, roomData);
 
               textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
               socketsInRoom.forEach(socket => {
