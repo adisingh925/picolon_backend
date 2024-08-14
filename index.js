@@ -235,7 +235,7 @@ const reconnect = async (ws, isConnected = false) => {
             roomData.connections++;
 
             // Send message to the current user that he is connected to the roomId
-            ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomId: ws.roomId, roomData }));
+            ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
 
             // Send message to all the people in the roomId except the current user
             ws.publish(ws.roomId, JSON.stringify({
