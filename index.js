@@ -221,6 +221,9 @@ const reconnect = async (ws, isConnected = false) => {
           socketIdToRoomId.set(ws.id, roomId);
           textChatMultiRoomIdToSockets.set(roomId, new Set([ws]));
           roomIdToRoomData.set(roomId, { roomName: ws.roomName, createTime: new Date().getTime(), roomId, connections: 1 });
+
+          // Send message to the current user that he is connected to the roomId
+          ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData: roomIdToRoomData.get(ws.roomId) }));
         } else if (ws.roomId) {
           const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
 
