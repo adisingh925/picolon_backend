@@ -331,7 +331,7 @@ const handleDisconnect = async (ws) => {
           socketIdToRoomId.delete(remainingSocket.id);
 
           done();
-          reconnect(remainingSocket, roomType);
+          reconnect(remainingSocket);
         } else {
           const waitingPeople = roomType === PRIVATE_TEXT_CHAT_DUO ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
           const index = waitingPeople.indexOf(ws);
