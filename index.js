@@ -61,7 +61,7 @@ uWS.SSLApp({
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 1048576,
   maxLifetime: 0,
-  idleTimeout: 0,
+  idleTimeout: 5,
 
   upgrade: (res, req, context) => {
     const address = convertArrayBufferToString(res.getRemoteAddressAsText());
