@@ -41,6 +41,7 @@ const port = 443;
 // Certificate Path SSL/TLS certificate files
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
+const caFilePath = path.join(__dirname, 'ssl', 'ca_bundle.crt');
 
 // Options for rate limiter
 const opts = {
@@ -57,6 +58,8 @@ const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_
 uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath,
+  ca_file_name: caFilePath,
+
 }).ws('/', {
   compression: uWS.SHARED_COMPRESSOR,
   maxPayloadLength: 1048576,
