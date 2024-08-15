@@ -64,7 +64,7 @@ uWS.SSLApp({
   idleTimeout: 10,
 
   upgrade: (res, req, context) => {
-    // const address = convertArrayBufferToString(res.getRemoteAddressAsText());
+    const address = convertArrayBufferToString(res.getRemoteAddressAsText());
 
     // Check if the IP has more than 3 connections
     // const ipCount = connectionsPerIp.get(address) || 0;
