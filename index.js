@@ -67,13 +67,13 @@ uWS.SSLApp({
     const address = convertArrayBufferToString(res.getRemoteAddressAsText());
 
     // Check if the IP has more than 3 connections
-    // const ipCount = connectionsPerIp.get(address) || 0;
-    // if (ipCount >= 3) {
-    //   res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
-    //   return;
-    // } else {
-    //   connectionsPerIp.set(address, ipCount + 1);
-    // }
+    const ipCount = connectionsPerIp.get(address) || 0;
+    if (ipCount >= 3) {
+      res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
+      return;
+    } else {
+      connectionsPerIp.set(address, ipCount + 1);
+    }
 
     // Sanitize and validate roomType
     const roomType = req.getQuery("RT");
