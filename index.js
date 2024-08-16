@@ -44,7 +44,7 @@ const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 
 // Options for rate limiter
 const opts = {
-  points: 50,
+  points: 30,
   duration: 1,
   blockDuration: 3,
 };
