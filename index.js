@@ -6,6 +6,7 @@ const lock = new AsyncLock();
 require('dotenv').config()
 const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
 
 //constants
 const PRIVATE_TEXT_CHAT_DUO = '0';
@@ -96,9 +97,15 @@ uWS.SSLApp({
       return;
     }
 
+    const roomKey = req.getQuery("RK");
+    if (roomKey && typeof roomKey !== 'string') {
+      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+      return;
+    }
+
     // Upgrade WebSocket connection
     res.upgrade(
-      { ip: address, roomType, roomName, roomId, id: req.getHeader('sec-websocket-key') },
+      { ip: address, roomType, roomName, roomId, roomKey, id: req.getHeader('sec-websocket-key') },
       req.getHeader('sec-websocket-key'),
       req.getHeader('sec-websocket-protocol'),
       req.getHeader('sec-websocket-extensions'),
@@ -220,21 +227,42 @@ const reconnect = async (ws, isConnected = false) => {
 
           socketIdToRoomId.set(ws.id, roomId);
           textChatMultiRoomIdToSockets.set(roomId, new Set([ws]));
-          roomIdToRoomData.set(roomId, { roomName: ws.roomName, createTime: new Date().getTime(), roomId, connections: 1 });
+
+          let roomData = {
+            roomName: ws.roomName,
+            createTime: new Date().getTime(),
+            roomId,
+            connections: 1
+          };
+
+          // Conditionally add roomKey if it exists
+          if (ws.roomKey) {
+            roomData.roomKey = ws.roomKey;
+          }
+
+          roomIdToRoomData.set(roomId, roomData);
 
           // Send message to the current user that he is connected to the roomId
-          ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData: roomIdToRoomData.get(roomId) }));
+          ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
         } else if (ws.roomId) {
           const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
 
           if (socketsInRoom) {
+            const roomData = roomIdToRoomData.get(ws.roomId);
+
+            if (roomData.roomKey && roomData.roomKey !== ws.roomKey) {
+              ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
+              ws.close();
+              done();
+              return;
+            }
+
             socketsInRoom.add(ws);
 
             // Subscribe to the roomId
             ws.subscribe(ws.roomId);
 
             // Increase the connection count for the roomId
-            const roomData = roomIdToRoomData.get(ws.roomId);
             roomData.connections++;
 
             // Send message to the current user that he is connected to the roomId
@@ -250,6 +278,8 @@ const reconnect = async (ws, isConnected = false) => {
           } else {
             ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
             ws.close();
+            done();
+            return;
           }
         }
       } else {
@@ -356,4 +386,15 @@ const handleDisconnect = async (ws) => {
 const convertArrayBufferToString = (arrayBuffer) => {
   const decoder = new TextDecoder();
   return decoder.decode(arrayBuffer);
+}
+
+const decryptText = (encryptedText) => {
+  return crypto.privateDecrypt(
+    {
+      key: fs.readFileSync(path.join(__dirname, 'keys', 'private.pem'), 'utf8'),
+      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+      oaepHash: 'sha256'
+    },
+    encryptedText
+  )
 }
