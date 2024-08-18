@@ -12,6 +12,7 @@ const fs = require('fs');
 const PRIVATE_TEXT_CHAT_DUO = '0';
 const PRIVATE_VIDEO_CHAT_DUO = '1';
 const PUBLIC_TEXT_CHAT_MULTI = '2';
+const PRIVATE_TEXT_CHAT_MULTI = '3';
 
 //server broadcast messages
 const CONNECTION_LIMIT_EXCEEDED = 'connection_limit_exceeded';
@@ -31,7 +32,8 @@ const socketIdToRoomType = new Map();
 const socketIdToRoomId = new Map();
 const connectionsPerIp = new Map();
 const textChatMultiRoomIdToSockets = new Map();
-const roomIdToRoomData = new Map();
+const publicRoomIdToRoomData = new Map();
+const privateRoomIdToRoomData = new Map();
 
 // Number of active connections
 var connections = 0;
@@ -53,7 +55,7 @@ const opts = {
 const rateLimiter = new RateLimiterMemory(opts);
 
 // Allowed roomId types
-const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI];
+const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
 
 uWS.SSLApp({
   key_file_name: keyFilePath,
@@ -85,27 +87,21 @@ uWS.SSLApp({
 
     // Sanitize and validate roomName
     const roomName = req.getQuery("RN");
-    if (roomName && typeof roomName !== 'string') {
+    if (roomName && typeof roomName !== 'string' && roomName.length > 0) {
       res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
       return;
     }
 
     // Sanitize and validate roomId
     const roomId = req.getQuery("RID");
-    if (roomId && typeof roomId !== 'string') {
-      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-      return;
-    }
-
-    const roomKey = req.getQuery("RK");
-    if (roomKey && typeof roomKey !== 'string') {
+    if (roomId && typeof roomId !== 'string' && roomId.length === 36) {
       res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
       return;
     }
 
     // Upgrade WebSocket connection
     res.upgrade(
-      { ip: address, roomType, roomName, roomId, roomKey, id: req.getHeader('sec-websocket-key') },
+      { ip: address, roomType, roomName, roomId, id: req.getHeader('sec-websocket-key') },
       req.getHeader('sec-websocket-key'),
       req.getHeader('sec-websocket-protocol'),
       req.getHeader('sec-websocket-extensions'),
@@ -171,7 +167,7 @@ uWS.SSLApp({
     res.writeHeader('Access-Control-Allow-Origin', origin);
   }
 
-  const rooms = Array.from(roomIdToRoomData.values());
+  const rooms = Array.from(publicRoomIdToRoomData.values());
   res.end(JSON.stringify(rooms));
 }).listen(port, (token) => {
   handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
@@ -189,36 +185,7 @@ const reconnect = async (ws, isConnected = false) => {
       const roomType = ws.roomType;
       socketIdToRoomType.set(ws.id, roomType);
 
-      if (roomType === PUBLIC_TEXT_CHAT_MULTI) {
-
-        // Check if the person is already in a roomId
-        const roomId = socketIdToRoomId.get(ws.id);
-
-        if (roomId) {
-          // Unsubscribe from the current roomId if present
-          ws.unsubscribe(roomId);
-
-          // send message to roomId that the peer is disconnected
-          ws.publish(roomId, JSON.stringify({ type: STRANGER_DISCONNECTED_FROM_THE_ROOM }));
-
-          // Remove the user from the chat roomId map if present
-          const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
-
-          if (socketsInRoom) {
-            if (socketsInRoom.has(ws)) {
-              socketsInRoom.delete(ws);
-
-              // If the roomId is empty, delete the roomId else update the roomId
-              if (socketsInRoom.size === 0) {
-                textChatMultiRoomIdToSockets.delete(roomId);
-                roomIdToRoomData.delete(roomId);
-              } else {
-                textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
-              }
-            }
-          }
-        }
-
+      if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
         if (ws.roomName) {
           const roomId = uuidv4();
 
@@ -236,26 +203,19 @@ const reconnect = async (ws, isConnected = false) => {
           };
 
           // Conditionally add roomKey if it exists
-          if (ws.roomKey) {
-            roomData.roomKey = ws.roomKey;
+          if (roomType === PRIVATE_TEXT_CHAT_MULTI) {
+            privateRoomIdToRoomData.set(roomId, roomData);
+          } else {
+            publicRoomIdToRoomData.set(roomId, roomData);
           }
-
-          roomIdToRoomData.set(roomId, roomData);
 
           // Send message to the current user that he is connected to the roomId
           ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
         } else if (ws.roomId) {
-          const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
+          const roomData = roomType === PUBLIC_TEXT_CHAT_MULTI ? publicRoomIdToRoomData.get(ws.roomId) : privateRoomIdToRoomData.get(ws.roomId);
 
-          if (socketsInRoom) {
-            const roomData = roomIdToRoomData.get(ws.roomId);
-
-            if (roomData.roomKey && roomData.roomKey !== ws.roomKey) {
-              ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
-              ws.close();
-              done();
-              return;
-            }
+          if (roomData) {
+            const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
 
             socketsInRoom.add(ws);
 
@@ -275,6 +235,12 @@ const reconnect = async (ws, isConnected = false) => {
 
             socketIdToRoomId.set(ws.id, ws.roomId);
             textChatMultiRoomIdToSockets.set(ws.roomId, socketsInRoom);
+
+            if (roomType === PRIVATE_TEXT_CHAT_MULTI) {
+              privateRoomIdToRoomData.set(ws.roomId, roomData);
+            } else {
+              publicRoomIdToRoomData.set(ws.roomId, roomData);
+            }
           } else {
             ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
             ws.close();
@@ -327,7 +293,7 @@ const handleDisconnect = async (ws) => {
       const roomType = socketIdToRoomType.get(ws.id);
       socketIdToRoomType.delete(ws.id);
 
-      if (roomType === PUBLIC_TEXT_CHAT_MULTI) {
+      if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
         if (roomId) {
           const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
 
@@ -336,12 +302,12 @@ const handleDisconnect = async (ws) => {
 
             if (socketsInRoom.size === 0) {
               textChatMultiRoomIdToSockets.delete(roomId);
-              roomIdToRoomData.delete(roomId);
+              roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.delete(roomId) : publicRoomIdToRoomData.delete(roomId);
             } else {
               // Decrease the connection count for the roomId
-              roomData = roomIdToRoomData.get(roomId);
+              let roomData = roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.get(roomId) : publicRoomIdToRoomData.get(roomId);
               roomData.connections--;
-              roomIdToRoomData.set(roomId, roomData);
+              roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.set(roomId, roomData) : publicRoomIdToRoomData.set(roomId, roomData);
 
               textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
               socketsInRoom.forEach(socket => {
