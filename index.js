@@ -199,6 +199,7 @@ const reconnect = async (ws, isConnected = false) => {
             roomName: ws.roomName,
             createTime: new Date().getTime(),
             roomId,
+            roomType,
             connections: 1
           };
 
