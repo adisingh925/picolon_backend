@@ -1,12 +1,13 @@
 const uWS = require('uWebSockets.js');
 const path = require('path');
 const AsyncLock = require('async-lock');
-const handleLog = require('./logging/logger');
 const lock = new AsyncLock();
 require('dotenv').config()
 const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
-const fs = require('fs');
+const createLog = require('./logging/logger');
+
+const WEBSITE_URL = "https://picolon.com";
 
 //constants
 const PRIVATE_TEXT_CHAT_DUO = '0';
@@ -14,7 +15,7 @@ const PRIVATE_VIDEO_CHAT_DUO = '1';
 const PUBLIC_TEXT_CHAT_MULTI = '2';
 const PRIVATE_TEXT_CHAT_MULTI = '3';
 
-//server broadcast messages
+// server broadcast messages
 const CONNECTION_LIMIT_EXCEEDED = 'connection_limit_exceeded';
 const RATE_LIMIT_EXCEEDED = 'rate_limit_exceeded';
 const CONNECTION_REJECTED = 'connection_rejected';
@@ -45,14 +46,21 @@ const port = 443;
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 
-// Options for rate limiter
+// rate limiter options for data transfer and API calls
 const opts = {
   points: 30,
   duration: 1,
   blockDuration: 3,
 };
 
+const APICallOptions = {
+  points: 5,
+  duration: 1,
+  blockDuration: 3,
+};
+
 const rateLimiter = new RateLimiterMemory(opts);
+const apiCallRateLimiter = new RateLimiterMemory(APICallOptions);
 
 // Allowed roomId types
 const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
@@ -67,38 +75,51 @@ uWS.SSLApp({
   idleTimeout: 10,
 
   upgrade: (res, req, context) => {
+    createLog('info', 'WebSocket Upgrade Request', { remoteAddress: convertArrayBufferToString(res.getRemoteAddressAsText()), websocketKey: req.getHeader('sec-websocket-key') });
     const address = convertArrayBufferToString(res.getRemoteAddressAsText());
 
     // Check if the IP has more than 3 connections
     const ipCount = connectionsPerIp.get(address) || 0;
     if (ipCount >= 3) {
+      createLog('info', 'Connection Limit Exceeded, Terminating Connection', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key') });
       res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
       return;
     } else {
       connectionsPerIp.set(address, ipCount + 1);
+      createLog('info', 'Connection Limit Check Passed', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key'), connections: ipCount });
     }
 
     // Sanitize and validate roomType
     const roomType = req.getQuery("RT");
     if (!allowedRoomTypes.includes(roomType)) {
+      createLog('info', 'RT Check Failed, Terminating Connection', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key'), query: req.getQuery() });
       res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
       return;
+    } else {
+      createLog('info', 'RT Check Passed', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key'), query: req.getQuery() });
     }
 
     // Sanitize and validate roomName
     const roomName = req.getQuery("RN");
-    if (roomName && typeof roomName !== 'string' && roomName.length > 0) {
+    if (roomName && typeof roomName !== 'string' && roomName.length > 0 && roomName.length <= 160) {
+      createLog('info', 'RN Check Failed, Terminating Connection', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key'), query: req.getQuery() });
       res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
       return;
+    } else {
+      createLog('info', 'RN Check Passed', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key'), query: req.getQuery() });
     }
 
     // Sanitize and validate roomId
     const roomId = req.getQuery("RID");
     if (roomId && typeof roomId !== 'string' && roomId.length === 36) {
+      createLog('info', 'RID Check Failed, Terminating Connection', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key'), query: req.getQuery() });
       res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
       return;
+    } else {
+      createLog('info', 'RID Check Passed', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key'), query: req.getQuery() });
     }
 
+    createLog('info', 'All Pre-Upgrade Checks Passed, Upgrading To Websocket Connection', { remoteAddress: address, websocketKey: req.getHeader('sec-websocket-key') });
     // Upgrade WebSocket connection
     res.upgrade(
       { ip: address, roomType, roomName, roomId, id: req.getHeader('sec-websocket-key') },
@@ -110,73 +131,123 @@ uWS.SSLApp({
   },
 
   subscription: (ws, roomId) => {
-    console.log(`WebSocket (${ws.id}) subscribed to roomId : ` + convertArrayBufferToString(roomId));
+    createLog('info', 'WebSocket Subscribed To Room', { roomId: convertArrayBufferToString(roomId), websocketKey: ws.id, remoteAddress: ws.ip });
   },
 
   open: (ws) => {
-    console.log("WebSocket connected : " + ws.id);
+    createLog('info', 'WebSocket Connected', { websocketKey: ws.id, remoteAddress: ws.ip });
     reconnect(ws, true);
   },
 
   message: (ws, message, isBinary) => {
     rateLimiter.consume(ws.id, 1).then((rateLimiterRes) => {
+      createLog('info', 'Rate Limit Safe For Data Transfer', { remoteAddress: ws.ip, websocketKey: ws.id, rateLimiterRes });
       const roomId = socketIdToRoomId.get(ws.id);
       if (roomId) ws.publish(roomId, message);
     }).catch((rateLimiterRes) => {
-      console.log("Rate limit exceeded for " + ws.id);
+      createLog('info', 'Rate Limit Exceeded For Data Transfer', { remoteAddress: ws.ip, websocketKey: ws.id, rateLimiterRes });
       ws.send(JSON.stringify({ type: RATE_LIMIT_EXCEEDED }));
     });
   },
 
   drain: (ws) => {
-    console.log('WebSocket backpressure : ' + ws.getBufferedAmount());
+    createLog('info', 'WebSocket Backpressure', { websocketKey: ws.id, bufferedAmount: ws.getBufferedAmount(), remoteAddress: ws.ip });
   },
 
   close: (ws, code, message) => {
-    console.log("WebSocket disconnected : " + ws.id);
+    createLog('info', 'WebSocket Disconnected', { websocketKey: ws.id, remoteAddress: ws.ip });
 
     // Decrease the connection count for IP
     const ip = ws.ip;
     const currentCount = connectionsPerIp.get(ip);
     if (currentCount > 1) {
+      createLog('info', 'Decreasing Connection Count For IP', { remoteAddress: ip, currentCount: currentCount - 1, websocketKey: ws.id });
       connectionsPerIp.set(ip, currentCount - 1);
     } else {
+      createLog('info', 'Removing IP From Connection Count Map', { remoteAddress: ip, websocketKey: ws.id });
       connectionsPerIp.delete(ip);
     }
 
     handleDisconnect(ws);
   }
 }).get('/api/v1/connections', (res, req) => {
-  // Get the origin of the request
-  const origin = req.getHeader('origin');
+  const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
+  createLog('info', 'Connection Count Fetch Request Received', { remoteAddress: clientIp });
 
-  // Set CORS headers conditionally
-  if (origin === 'http://localhost:3000' || origin === 'https://picolon.com') {
-    res.writeHeader('Access-Control-Allow-Origin', origin);
-  }
+  apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
+    createLog('info', 'Rate Limit Safe For Connection Count Fetch', { remoteAddress: clientIp, rateLimiterRes });
+    const allowedOrigins = [WEBSITE_URL];
+    const origin = req.getHeader('origin');
 
-  res.writeHeader('Access-Control-Allow-Methods', 'GET');
-  res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.end(connections.toString());
+    if (allowedOrigins.includes(origin)) {
+      res.writeHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      createLog('info', 'Origin Not Allowed', { remoteAddress: clientIp, origin });
+    }
+
+    res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Security headers
+    res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+    res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.writeHeader('X-Content-Type-Options', 'nosniff');
+    res.writeHeader('X-Frame-Options', 'DENY');
+    res.writeHeader('X-XSS-Protection', '1; mode=block');
+    res.writeHeader('Referrer-Policy', 'no-referrer');
+    res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+
+    res.end(connections.toString());
+  }).catch((rateLimiterRes) => {
+    createLog('info', 'Rate Limit Exceeded For Connection Count Fetch', { remoteAddress: clientIp, rateLimiterRes });
+    res.writeStatus('429 Too Many Requests').end();
+  });
 }).get("/api/v1/public-text-chat-rooms", (res, req) => {
-  // Get the origin of the request
-  const origin = req.getHeader('origin');
+  const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
+  createLog('info', 'Public Chat Rooms Fetch Request Received', { remoteAddress: clientIp });
 
-  // Set CORS headers conditionally
-  if (origin === 'http://localhost:3000' || origin === 'https://picolon.com') {
-    res.writeHeader('Access-Control-Allow-Origin', origin);
-  }
+  apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
+    createLog('info', 'Rate Limit Safe For Public Chat Rooms Fetch', { remoteAddress: clientIp, rateLimiterRes });
+    // Allowed origins
+    const allowedOrigins = ['https://picolon.com'];
+    const origin = req.getHeader('origin');
 
-  const rooms = Array.from(publicRoomIdToRoomData.values());
-  res.end(JSON.stringify(rooms));
+    // Set CORS headers
+    if (allowedOrigins.includes(origin)) {
+      res.writeHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      createLog('info', 'Origin Not Allowed', { remoteAddress: clientIp, origin });
+    }
+
+    res.writeHeader('Access-Control-Allow-Methods', 'GET');
+    res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Security headers
+    res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+    res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.writeHeader('X-Content-Type-Options', 'nosniff');
+    res.writeHeader('X-Frame-Options', 'DENY');
+    res.writeHeader('X-XSS-Protection', '1; mode=block');
+    res.writeHeader('Referrer-Policy', 'no-referrer');
+    res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+
+    // Handle GET requests
+    const rooms = Array.from(publicRoomIdToRoomData.values());
+    res.end(JSON.stringify(rooms));
+  }).catch((rateLimiterRes) => {
+    createLog('info', 'Rate Limit Exceeded For Public Chat Rooms Fetch', { remoteAddress: clientIp, rateLimiterRes });
+    res.writeStatus('429 Too Many Requests').end();
+  });
 }).listen(port, (token) => {
-  handleLog(token ? `Listening to port ${port}` : `Failed to listen to port ${port}`);
+  createLog('info', 'Server Startup', {
+    port: port
+  });
 });
 
 const reconnect = async (ws, isConnected = false) => {
   try {
     lock.acquire("reconnect", async (done) => {
-      console.log("reconnect lock acquired for " + ws.id);
+      createLog('info', 'Reconnect Lock Acquired', { websocketKey: ws.id, remoteAddress: ws.ip });
 
       if (isConnected) {
         connections++;
@@ -277,22 +348,23 @@ const reconnect = async (ws, isConnected = false) => {
 
       done();
     }, function (err, ret) {
-      console.log("reconnect lock released for " + ws.id);
+      createLog('info', 'Reconnect Lock Released', { websocketKey: ws.id, remoteAddress: ws.ip });
     }, {});
   } catch (error) {
-    handleLog(`Error in reconnect: ${error.message}`);
+    createLog('error', 'Error in reconnect', { error: error.message, websocketKey: ws.id, remoteAddress: ws.ip });
   }
 }
 
 const handleDisconnect = async (ws) => {
   try {
     lock.acquire("disconnect", async (done) => {
-      console.log("disconnect lock acquired for " + ws.id);
-      console.log("Connections Remaining: " + --connections);
+      --connections
+
+      createLog('info', 'Disconnect Lock Acquired', { websocketKey: ws.id, remoteAddress: ws.ip });
+      createLog('info', 'Connections Remaining', { websocketKey: ws.id, remoteAddress: ws.ip, connections });
 
       const roomId = socketIdToRoomId.get(ws.id);
       const roomType = socketIdToRoomType.get(ws.id);
-      socketIdToRoomType.delete(ws.id);
 
       if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
         if (roomId) {
@@ -319,6 +391,7 @@ const handleDisconnect = async (ws) => {
             }
           }
 
+          socketIdToRoomType.delete(ws.id);
           socketIdToRoomId.delete(ws.id);
         }
       } else {
@@ -343,25 +416,14 @@ const handleDisconnect = async (ws) => {
 
       done();
     }, function (err, ret) {
-      console.log("disconnect lock released for " + ws.id);
+      createLog('info', 'Disconnect Lock Released', { websocketKey: ws.id, remoteAddress: ws.ip });
     }, {});
   } catch (error) {
-    handleLog(`Error in disconnect: ${error.message}`);
+    createLog('error', 'Error in disconnect', { error: error.message, websocketKey: ws.id, remoteAddress: ws.ip });
   }
 }
 
 const convertArrayBufferToString = (arrayBuffer) => {
   const decoder = new TextDecoder();
   return decoder.decode(arrayBuffer);
-}
-
-const decryptText = (encryptedText) => {
-  return crypto.privateDecrypt(
-    {
-      key: fs.readFileSync(path.join(__dirname, 'keys', 'private.pem'), 'utf8'),
-      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-      oaepHash: 'sha256'
-    },
-    encryptedText
-  )
 }
