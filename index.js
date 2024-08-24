@@ -54,7 +54,7 @@ const opts = {
 };
 
 const APICallOptions = {
-  points: 5,
+  points: 1,
   duration: 1,
   blockDuration: 3,
 };
