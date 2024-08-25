@@ -25,6 +25,10 @@ const ROOM_NOT_FOUND = 'room_not_found';
 const DOUBLE_CHAT_ROOM_WAITING_PEOPLE_LIST = "double_chat_room_waiting_people_list";
 const DOUBLE_VIDEO_CHAT_ROOM_WAITING_PEOPLE_LIST = "double_video_chat_room_waiting_people_list";
 
+// Rate limiter constants
+const RATE_LIMIT_WINDOW = 5;
+const MAX_REQUESTS = 5
+
 // Maps to store necessary data
 const socketIdToSocket = new Map();
 
@@ -46,14 +50,7 @@ const opts = {
   blockDuration: 3,
 };
 
-const APICallOptions = {
-  points: 1,
-  duration: 1,
-  blockDuration: 3,
-};
-
 const rateLimiter = new RateLimiterMemory(opts);
-const apiCallRateLimiter = new RateLimiterMemory(APICallOptions);
 
 // Allowed roomId types
 const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
@@ -95,18 +92,22 @@ uWS.SSLApp({
             return;
           }
 
-          if (roomName && typeof roomName !== 'string' && roomName.length > 0 && roomName.length <= 160) {
-            res.cork(() => {
-              res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-            });
-            return;
+          if (roomName) {
+            if (typeof roomName !== 'string' || !(roomName.length > 0 && roomName.length <= 160)) {
+              res.cork(() => {
+                res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+              });
+              return;
+            }
           }
 
-          if (roomId && typeof roomId !== 'string' && roomId.length === 36) {
-            res.cork(() => {
-              res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-            });
-            return;
+          if (roomId) {
+            if (typeof roomId !== 'string' || roomId.length !== 36) {
+              res.cork(() => {
+                res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+              });
+              return;
+            }
           }
 
           if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
@@ -147,7 +148,7 @@ uWS.SSLApp({
     reconnect(ws, true);
   },
 
-  message: (ws, message, isBinary) => {
+  message: (ws, message, _isBinary) => {
     let data = convertArrayBufferToString(message);
     rateLimiter.consume(ws.id, 1).then((rateLimiterRes) => {
       redisClient.get(`socket_id_to_room_id:${ws.id}`).then((roomId) => {
@@ -164,7 +165,7 @@ uWS.SSLApp({
     console.log('WebSocket backpressure: ' + ws.getBufferedAmount());
   },
 
-  close: async (ws, code, message) => {
+  close: async (ws, _code, _message) => {
     const ip = ws.ip;
     const count = await redisClient.get(`ip_address_to_connection_count:${ip}`);
     const countInt = parseInt(count);
@@ -175,83 +176,88 @@ uWS.SSLApp({
       await redisClient.del(`ip_address_to_connection_count:${ip}`);
     }
   }
-}).get('/api/v1/connections', (res, req) => {
+}).get('/api/v1/connections', async (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
-  apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
-    const origin = req.getHeader('origin');
+  const isAllowed = await apiRateLimiter(clientIp);
 
-    if (allowedOrigins.includes(origin)) {
-      res.writeHeader('Access-Control-Allow-Origin', origin);
-      res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-      // Security headers
-      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
-      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.writeHeader('X-Content-Type-Options', 'nosniff');
-      res.writeHeader('X-Frame-Options', 'DENY');
-      res.writeHeader('X-XSS-Protection', '1; mode=block');
-      res.writeHeader('Referrer-Policy', 'no-referrer');
-      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
-
-      redisClient.get(connections).then((connections) => {
-        res.cork(() => {
-          res.end(connections.toString());
-        });
-      }).catch((error) => {
-        console.log('Error in getting connections', error);
-        res.writeStatus('500 Internal Server Error').end();
-      });
-    } else {
-      res.writeStatus('403 Forbidden').end();
-    }
-  }).catch((rateLimiterRes) => {
+  if (!isAllowed) {
     res.writeStatus('429 Too Many Requests').end();
-  });
+    return;
+  }
+
+  const origin = req.getHeader('origin');
+
+  if (allowedOrigins.includes(origin)) {
+    res.writeHeader('Access-Control-Allow-Origin', origin);
+    res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Security headers
+    res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+    res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.writeHeader('X-Content-Type-Options', 'nosniff');
+    res.writeHeader('X-Frame-Options', 'DENY');
+    res.writeHeader('X-XSS-Protection', '1; mode=block');
+    res.writeHeader('Referrer-Policy', 'no-referrer');
+    res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+
+    redisClient.get(connections).then((connections) => {
+      res.cork(() => {
+        res.end(connections.toString());
+      });
+    }).catch((error) => {
+      console.log('Error in getting connections', error);
+      res.writeStatus('500 Internal Server Error').end();
+    });
+  } else {
+    res.writeStatus('403 Forbidden').end();
+  }
 
   res.onAborted(() => {
     console.warn('Request Aborted');
   });
 }).get("/api/v1/public-text-chat-rooms", async (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
+  const isAllowed = await apiRateLimiter(clientIp);
 
-  apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
-    const origin = req.getHeader('origin');
-
-    // Set CORS headers
-    if (allowedOrigins.includes(origin)) {
-      res.writeHeader('Access-Control-Allow-Origin', origin);
-      res.writeHeader('Access-Control-Allow-Methods', 'GET');
-      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-      // Security headers
-      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
-      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.writeHeader('X-Content-Type-Options', 'nosniff');
-      res.writeHeader('X-Frame-Options', 'DENY');
-      res.writeHeader('X-XSS-Protection', '1; mode=block');
-      res.writeHeader('Referrer-Policy', 'no-referrer');
-      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
-
-      // Handle GET requests
-      redisClient.hGetAll("public_room_id_to_room_data")
-        .then((rooms) => {
-          const roomValues = Object.values(rooms);
-          res.cork(() => {
-            res.writeHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(roomValues));
-          });
-        })
-        .catch((error) => {
-          console.log('Error in fetching public rooms', error);
-          res.writeStatus('500 Internal Server Error').end();
-        });
-    } else {
-      res.writeStatus('403 Forbidden').end();
-    }
-  }).catch((rateLimiterRes) => {
+  if (!isAllowed) {
     res.writeStatus('429 Too Many Requests').end();
-  });
+    return;
+  }
+
+  const origin = req.getHeader('origin');
+
+  // Set CORS headers
+  if (allowedOrigins.includes(origin)) {
+    res.writeHeader('Access-Control-Allow-Origin', origin);
+    res.writeHeader('Access-Control-Allow-Methods', 'GET');
+    res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Security headers
+    res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+    res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.writeHeader('X-Content-Type-Options', 'nosniff');
+    res.writeHeader('X-Frame-Options', 'DENY');
+    res.writeHeader('X-XSS-Protection', '1; mode=block');
+    res.writeHeader('Referrer-Policy', 'no-referrer');
+    res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+
+    // Handle GET requests
+    redisClient.hGetAll("public_room_id_to_room_data")
+      .then((rooms) => {
+        const roomValues = Object.values(rooms);
+        res.cork(() => {
+          res.writeHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(roomValues));
+        });
+      })
+      .catch((error) => {
+        console.log('Error in fetching public rooms', error);
+        res.writeStatus('500 Internal Server Error').end();
+      });
+  } else {
+    res.writeStatus('403 Forbidden').end();
+  }
 
   res.onAborted(() => {
     console.warn('Request Aborted');
@@ -502,3 +508,18 @@ subscriber.subscribe('data', async (message) => {
     }
   }
 });
+
+async function apiRateLimiter(clientIp) {
+  const key = `rate_limit:${clientIp}`;
+  const currentCount = await redisClient.incr(key);
+
+  if (currentCount === 1) {
+    await redisClient.expire(key, RATE_LIMIT_WINDOW);
+  }
+
+  if (currentCount > MAX_REQUESTS) {
+    return false;
+  }
+
+  return true;
+}
