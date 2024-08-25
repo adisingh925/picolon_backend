@@ -1,10 +1,9 @@
 const uWS = require('uWebSockets.js');
 const path = require('path');
-const AsyncLock = require('async-lock');
-const lock = new AsyncLock();
 require('dotenv').config()
 const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
+const { client: redisClient, subscriber, publisher } = require('./redis');
 
 const WEBSITE_URL = "https://picolon.com";
 const allowedOrigins = [WEBSITE_URL];
@@ -23,21 +22,15 @@ const STRANGER_DISCONNECTED_FROM_THE_ROOM = 'stranger_disconnected_from_the_room
 const YOU_ARE_CONNECTED_TO_THE_ROOM = 'you_are_connected_to_the_room';
 const STRANGER_CONNECTED_TO_THE_ROOM = 'stranger_connected_to_the_room';
 const ROOM_NOT_FOUND = 'room_not_found';
+const DOUBLE_CHAT_ROOM_WAITING_PEOPLE_LIST = "double_chat_room_waiting_people_list";
+const DOUBLE_VIDEO_CHAT_ROOM_WAITING_PEOPLE_LIST = "double_video_chat_room_waiting_people_list";
 
 // Maps to store necessary data
-const doubleChatRoomWaitingPeople = [];
-const doubleVideoRoomWaitingPeople = [];
-const textChatDuoRoomIdToSockets = new Map();
-const videoChatDuoRoomIdToSockets = new Map();
-const socketIdToRoomType = new Map();
-const socketIdToRoomId = new Map();
-const connectionsPerIp = new Map();
-const textChatMultiRoomIdToSockets = new Map();
-const publicRoomIdToRoomData = new Map();
-const privateRoomIdToRoomData = new Map();
+const socketIdToSocket = new Map();
 
 // Number of active connections
-var connections = 0;
+const connections = 'connections';
+redisClient.set(connections, 0, 'NX');
 
 // Port to listen
 const port = 443;
@@ -76,52 +69,83 @@ uWS.SSLApp({
 
   upgrade: (res, req, context) => {
     const address = convertArrayBufferToString(res.getRemoteAddressAsText());
-
-    const ipCount = connectionsPerIp.get(address) || 0;
-    if (ipCount >= 3) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
-      return;
-    } else {
-      connectionsPerIp.set(address, ipCount + 1);
-    }
-
     const roomType = req.getQuery("RT");
-    if (!allowedRoomTypes.includes(roomType)) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-      return;
-    }
-
     const roomName = req.getQuery("RN");
-    if (roomName && typeof roomName !== 'string' && roomName.length > 0 && roomName.length <= 160) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-      return;
-    }
-
     const roomId = req.getQuery("RID");
-    if (roomId && typeof roomId !== 'string' && roomId.length === 36) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-      return;
-    }
+    const websocketKey = req.getHeader('sec-websocket-key');
+    const websocketProtocol = req.getHeader('sec-websocket-protocol');
+    const websocketExtensions = req.getHeader('sec-websocket-extensions');
 
-    if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
-      if (!roomName && !roomId) {
-        res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-        return;
+    redisClient.get(`ip_address_to_connection_count:${address}`).then((count) => {
+      let countInt = parseInt(count);
+      if (isNaN(countInt)) {
+        countInt = 0;
       }
-    }
+      if (countInt >= 3) {
+        res.cork(() => {
+          res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
+        });
+        return;
+      } else {
+        redisClient.set(`ip_address_to_connection_count:${address}`, countInt + 1).then(() => {
+          if (!allowedRoomTypes.includes(roomType)) {
+            res.cork(() => {
+              res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+            });
+            return;
+          }
 
-    // Upgrade WebSocket connection
-    res.upgrade(
-      { ip: address, roomType, roomName, roomId, id: req.getHeader('sec-websocket-key') },
-      req.getHeader('sec-websocket-key'),
-      req.getHeader('sec-websocket-protocol'),
-      req.getHeader('sec-websocket-extensions'),
-      context
-    );
+          if (roomName && typeof roomName !== 'string' && roomName.length > 0 && roomName.length <= 160) {
+            res.cork(() => {
+              res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+            });
+            return;
+          }
+
+          if (roomId && typeof roomId !== 'string' && roomId.length === 36) {
+            res.cork(() => {
+              res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+            });
+            return;
+          }
+
+          if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
+            if (!roomName && !roomId) {
+              res.cork(() => { res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED); });
+              return;
+            }
+          }
+
+          // Upgrade WebSocket connection
+          res.cork(() => {
+            res.upgrade(
+              { ip: address, roomType, roomName, roomId, id: websocketKey },
+              websocketKey,
+              websocketProtocol,
+              websocketExtensions,
+              context
+            );
+          });
+        }).catch((error) => {
+          console.log('update_ip_count_error', error);
+          res.cork(() => { res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED); });
+          return;
+        });
+      }
+    }).catch((error) => {
+      console.log('fetch_ip_count_error', error);
+      res.cork(() => { res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED); });
+      return;
+    });
+
+    res.onAborted(() => {
+      console.warn('Request Aborted');
+    });
   },
 
   subscription: (ws, roomId) => {
     // subscribed to the room
+    console.log('Subscribed to room', convertArrayBufferToString(roomId));
   },
 
   open: (ws) => {
@@ -129,9 +153,13 @@ uWS.SSLApp({
   },
 
   message: (ws, message, isBinary) => {
+    let data = convertArrayBufferToString(message);
     rateLimiter.consume(ws.id, 1).then((rateLimiterRes) => {
-      const roomId = socketIdToRoomId.get(ws.id);
-      if (roomId) ws.publish(roomId, message);
+      redisClient.get(`socket_id_to_room_id:${ws.id}`).then((roomId) => {
+        if (roomId) publisher.publish('data', JSON.stringify({ type: "send_message_to_others", socket_id: ws.id, message: data, roomId }));
+      }).catch((error) => {
+        console.log('Error in getting roomId from socketId', error);
+      })
     }).catch((rateLimiterRes) => {
       ws.send(JSON.stringify({ type: RATE_LIMIT_EXCEEDED }));
     });
@@ -141,16 +169,16 @@ uWS.SSLApp({
     console.log('WebSocket backpressure: ' + ws.getBufferedAmount());
   },
 
-  close: (ws, code, message) => {
+  close: async (ws, code, message) => {
     const ip = ws.ip;
-    const currentCount = connectionsPerIp.get(ip);
-    if (currentCount > 1) {
-      connectionsPerIp.set(ip, currentCount - 1);
+    const count = await redisClient.get(`ip_address_to_connection_count:${ip}`);
+    const countInt = parseInt(count);
+    if (countInt > 0) {
+      await redisClient.set(`ip_address_to_connection_count:${ip}`, countInt - 1);
+      handleDisconnect(ws);
     } else {
-      connectionsPerIp.delete(ip);
+      await redisClient.del(`ip_address_to_connection_count:${ip}`);
     }
-
-    handleDisconnect(ws);
   }
 }).get('/api/v1/connections', (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
@@ -171,14 +199,24 @@ uWS.SSLApp({
       res.writeHeader('Referrer-Policy', 'no-referrer');
       res.writeHeader('Permissions-Policy', 'geolocation=(self)');
 
-      res.end(connections.toString());
+      redisClient.get(connections).then((connections) => {
+        res.cork(() => {
+          res.end(connections.toString());
+        });
+      }).catch((error) => {
+        res.writeStatus('500 Internal Server Error').end();
+      });
     } else {
       res.writeStatus('403 Forbidden').end();
     }
   }).catch((rateLimiterRes) => {
     res.writeStatus('429 Too Many Requests').end();
   });
-}).get("/api/v1/public-text-chat-rooms", (res, req) => {
+
+  res.onAborted(() => {
+    console.warn('Request Aborted');
+  });
+}).get("/api/v1/public-text-chat-rooms", async (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
 
   apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
@@ -201,13 +239,26 @@ uWS.SSLApp({
       res.writeHeader('Permissions-Policy', 'geolocation=(self)');
 
       // Handle GET requests
-      const rooms = Array.from(publicRoomIdToRoomData.values());
-      res.end(JSON.stringify(rooms));
+      redisClient.hGetAll("public_room_id_to_room_data")
+        .then((rooms) => {
+          const roomValues = Object.values(rooms);
+          res.cork(() => {
+            res.writeHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(roomValues));
+          });
+        })
+        .catch((error) => {
+          res.writeStatus('500 Internal Server Error').end();
+        });
     } else {
       res.writeStatus('403 Forbidden').end();
     }
   }).catch((rateLimiterRes) => {
     res.writeStatus('429 Too Many Requests').end();
+  });
+
+  res.onAborted(() => {
+    console.warn('Request Aborted');
   });
 }).any("/*", (res, req) => {
   res.writeStatus('404 Not Found')
@@ -223,93 +274,122 @@ uWS.SSLApp({
 
 const reconnect = async (ws, isConnected = false) => {
   try {
-    lock.acquire("reconnect", async (done) => {
-      if (isConnected) {
-        connections++;
-      }
+    await redisClient.watch(`socket_id_to_room_id:${ws.id}`);
+    const multi = redisClient.multi();
 
-      const roomType = ws.roomType;
-      socketIdToRoomType.set(ws.id, roomType);
+    if (isConnected) {
+      multi.incr(connections);
+    }
 
-      if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
-        if (ws.roomName) {
-          const roomId = uuidv4();
-          ws.subscribe(roomId);
-          socketIdToRoomId.set(ws.id, roomId);
-          textChatMultiRoomIdToSockets.set(roomId, new Set([ws]));
+    const roomType = ws.roomType;
+    multi.set(`socket_id_to_room_type:${ws.id}`, roomType);
 
-          let roomData = {
-            roomName: ws.roomName,
-            createTime: new Date().getTime(),
-            roomId,
-            roomType,
-            connections: 1
-          };
+    if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
+      if (ws.roomName) {
+        const roomId = uuidv4();
+        socketIdToSocket.set(ws.id, ws);
+
+        multi.set(`socket_id_to_room_id:${ws.id}`, roomId);
+        multi.set(`room_id_to_socket_ids:${roomId}`, JSON.stringify([ws.id]));
+
+        let roomData = {
+          roomName: ws.roomName,
+          createTime: new Date().getTime(),
+          roomId,
+          roomType,
+          connections: 1
+        };
+
+        if (roomType === PRIVATE_TEXT_CHAT_MULTI) {
+          multi.set(`private_room_id_to_room_data:${roomId}`, JSON.stringify(roomData));
+        } else {
+          multi.set(`public_room_id_to_room_data:${roomId}`, JSON.stringify(roomData));
+        }
+
+        const execResult = await multi.exec();
+
+        if (!execResult) {
+          console.log(`error in creating room ${ws.roomName}`);
+        } else {
+          ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
+        }
+      } else if (ws.roomId) {
+        const roomDataJsonString = await redisClient.get(roomType === PUBLIC_TEXT_CHAT_MULTI ? `public_room_id_to_room_data:${ws.roomId}` : `private_room_id_to_room_data:${ws.roomId}`);
+        const roomData = JSON.parse(roomDataJsonString);
+
+        if (roomData) {
+          const socketIdsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${ws.roomId}`);
+          const socketIdsInRoom = JSON.parse(socketIdsInRoomJsonString);
+          socketIdsInRoom.push(ws.id);
+          socketIdToSocket.set(ws.id, ws);
+
+          roomData.connections++;
+
+          multi.set(`socket_id_to_room_id:${ws.id}`, ws.roomId);
+          multi.set(`room_id_to_socket_ids:${ws.roomId}`, JSON.stringify(socketIdsInRoom));
 
           if (roomType === PRIVATE_TEXT_CHAT_MULTI) {
-            privateRoomIdToRoomData.set(roomId, roomData);
+            multi.set(`private_room_id_to_room_data:${ws.roomId}`, JSON.stringify(roomData));
           } else {
-            publicRoomIdToRoomData.set(roomId, roomData);
+            multi.set(`public_room_id_to_room_data:${ws.roomId}`, JSON.stringify(roomData));
           }
 
-          ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
-        } else if (ws.roomId) {
-          const roomData = roomType === PUBLIC_TEXT_CHAT_MULTI ? publicRoomIdToRoomData.get(ws.roomId) : privateRoomIdToRoomData.get(ws.roomId);
-
-          if (roomData) {
-            const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
-            socketsInRoom.add(ws);
-            ws.subscribe(ws.roomId);
-            roomData.connections++;
-            ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
-
-            ws.publish(ws.roomId, JSON.stringify({
-              type: STRANGER_CONNECTED_TO_THE_ROOM,
-            }), false, true);
-
-            socketIdToRoomId.set(ws.id, ws.roomId);
-            textChatMultiRoomIdToSockets.set(ws.roomId, socketsInRoom);
-
-            if (roomType === PRIVATE_TEXT_CHAT_MULTI) {
-              privateRoomIdToRoomData.set(ws.roomId, roomData);
-            } else {
-              publicRoomIdToRoomData.set(ws.roomId, roomData);
-            }
+          const execResult = await multi.exec();
+          if (!execResult) {
+            console.log(`error in reconnecting to room ${ws.roomId}`);
           } else {
-            ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
-            ws.close();
-            done();
-            return;
+            ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
+            publisher.publish('data', JSON.stringify({ type: "send_message_to_others", socket_id: ws.id, roomId: ws.roomId, message: JSON.stringify({ type: STRANGER_CONNECTED_TO_THE_ROOM }) }));
+          }
+        } else {
+          ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
+          ws.close();
+          return;
+        }
+      }
+    } else {
+      let waitingListKey = roomType === PRIVATE_TEXT_CHAT_DUO ? DOUBLE_CHAT_ROOM_WAITING_PEOPLE_LIST : DOUBLE_VIDEO_CHAT_ROOM_WAITING_PEOPLE_LIST;
+      const peerSocketId = await redisClient.lIndex(waitingListKey, 0);
+      socketIdToSocket.set(ws.id, ws);
+
+      if (peerSocketId) {
+        const roomId = uuidv4();
+
+        // setting room id to socket ids mapping in redis
+        multi.set(`room_id_to_socket_ids:${roomId}`, JSON.stringify([ws.id, peerSocketId]));
+
+        // setting room id to socket id mapping in redis
+        multi.set(`socket_id_to_room_id:${ws.id}`, roomId);
+        multi.set(`socket_id_to_room_id:${peerSocketId}`, roomId);
+        multi.lRem(waitingListKey, 1, peerSocketId);
+
+        const execResult = await multi.exec();
+
+        if (!execResult) {
+          console.log(`error in creating room for ${roomType}`);
+        } else {
+          // notifying both the sockets that they are connected to each other
+          const message = JSON.stringify({ type: 'paired', message: "You are connected to Stranger" });
+
+          publisher.publish('data', JSON.stringify({ type: "send_message", socket_id: ws.id, message }));
+          publisher.publish('data', JSON.stringify({ type: "send_message", socket_id: peerSocketId, message }));
+
+          // notifying the initiator if its a video chat duo room
+          if (roomType === PRIVATE_VIDEO_CHAT_DUO) {
+            publisher.publish('data', JSON.stringify({ type: "send_message", socket_id: ws.id, message: JSON.stringify({ type: 'initiator', message: "You are the initiator!" }) }));
           }
         }
       } else {
-        const waitingPeople = roomType === PRIVATE_TEXT_CHAT_DUO ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
-        const peerSocket = waitingPeople.length > 0 ? waitingPeople.splice(Math.floor(Math.random() * waitingPeople.length), 1)[0] : null;
+        multi.lPush(waitingListKey, ws.id);
 
-        if (peerSocket) {
-          const roomId = uuidv4();
-          peerSocket.subscribe(roomId);
-          ws.subscribe(roomId);
-
-          const rooms = roomType === PRIVATE_TEXT_CHAT_DUO ? textChatDuoRoomIdToSockets : videoChatDuoRoomIdToSockets;
-          rooms.set(roomId, { socket1: ws, socket2: peerSocket });
-          socketIdToRoomId.set(ws.id, roomId);
-          socketIdToRoomId.set(peerSocket.id, roomId);
-          const message = JSON.stringify({ type: 'paired', message: "You are connected to Stranger" });
-          ws.send(message);
-          peerSocket.send(message);
-
-          if (roomType === PRIVATE_VIDEO_CHAT_DUO) {
-            ws.send(JSON.stringify({ type: 'initiator', message: "You are the initiator!" }));
-          }
+        const execResult = await multi.exec();
+        if (!execResult) {
+          console.log(`error in adding to waiting list for ${roomType}`);
         } else {
-          waitingPeople.push(ws);
+          console.log(`added to waiting list for ${roomType}`);
         }
       }
-
-      done();
-    }, function (err, ret) {
-    }, {});
+    }
   } catch (error) {
     console.log('Error in reconnect', error);
   }
@@ -317,60 +397,80 @@ const reconnect = async (ws, isConnected = false) => {
 
 const handleDisconnect = async (ws) => {
   try {
-    lock.acquire("disconnect", async (done) => {
-      --connections;
+    await redisClient.watch(`socket_id_to_room_id:${ws.id}`);
+    const multi = redisClient.multi();
 
-      const roomId = socketIdToRoomId.get(ws.id);
-      const roomType = socketIdToRoomType.get(ws.id);
+    multi.decr(connections);
 
-      if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
-        if (roomId) {
-          const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
+    const roomId = await redisClient.get(`socket_id_to_room_id:${ws.id}`);
+    const roomType = await redisClient.get(`socket_id_to_room_type:${ws.id}`);
 
-          if (socketsInRoom) {
-            socketsInRoom.delete(ws);
+    if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
+      if (roomId) {
+        const socketsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${roomId}`);
+        let socketsInRoom = JSON.parse(socketsInRoomJsonString);
 
-            if (socketsInRoom.size === 0) {
-              textChatMultiRoomIdToSockets.delete(roomId);
-              roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.delete(roomId) : publicRoomIdToRoomData.delete(roomId);
+        if (socketsInRoom) {
+          socketsInRoom = socketsInRoom.filter(id => id !== ws.id);
+          socketIdToSocket.delete(ws.id);
+
+          if (socketsInRoom.length === 0) {
+            multi.del(`room_id_to_socket_ids:${roomId}`);
+            multi.del(roomType === PRIVATE_TEXT_CHAT_MULTI ? `private_room_id_to_room_data:${roomId}` : `public_room_id_to_room_data:${roomId}`);
+          } else {
+            const roomDataJsonString = await redisClient.get(roomType === PRIVATE_TEXT_CHAT_MULTI ? `private_room_id_to_room_data:${roomId}` : `public_room_id_to_room_data:${roomId}`);
+            const roomData = JSON.parse(roomDataJsonString);
+            roomData.connections--;
+            multi.set(roomType === PRIVATE_TEXT_CHAT_MULTI ? `private_room_id_to_room_data:${roomId}` : `public_room_id_to_room_data:${roomId}`, JSON.stringify(roomData));
+            multi.set(`room_id_to_socket_ids:${roomId}`, JSON.stringify(socketsInRoom));
+            multi.del(`socket_id_to_room_type:${ws.id}`);
+            multi.del(`socket_id_to_room_id:${ws.id}`);
+
+            const execResult = await multi.exec();
+
+            if (!execResult) {
+              console.log(`error in removing from room ${roomId}`);
             } else {
-              let roomData = roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.get(roomId) : publicRoomIdToRoomData.get(roomId);
-              roomData.connections--;
-              roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.set(roomId, roomData) : publicRoomIdToRoomData.set(roomId, roomData);
-              textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
-              socketsInRoom.forEach(socket => {
-                socket.send(JSON.stringify({
-                  type: STRANGER_DISCONNECTED_FROM_THE_ROOM,
-                }));
-              });
+              publisher.publish('data', JSON.stringify({ type: "send_message_to_others", socket_id: ws.id, roomId, message: JSON.stringify({ type: STRANGER_DISCONNECTED_FROM_THE_ROOM }) }));
             }
           }
-
-          socketIdToRoomType.delete(ws.id);
-          socketIdToRoomId.delete(ws.id);
-        }
-      } else {
-        if (roomId) {
-          const rooms = roomType === PRIVATE_TEXT_CHAT_DUO ? textChatDuoRoomIdToSockets : videoChatDuoRoomIdToSockets;
-          const { socket1, socket2 } = rooms.get(roomId);
-          const remainingSocket = (socket1.id === ws.id) ? socket2 : socket1;
-          remainingSocket.send(JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }));
-          rooms.delete(roomId);
-          socketIdToRoomId.delete(ws.id);
-          socketIdToRoomId.delete(remainingSocket.id);
-
-          done();
-          reconnect(remainingSocket);
-        } else {
-          const waitingPeople = roomType === PRIVATE_TEXT_CHAT_DUO ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
-          const index = waitingPeople.indexOf(ws);
-          if (index !== -1) waitingPeople.splice(index, 1);
         }
       }
+    } else {
+      if (roomId) {
+        const socketsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${roomId}`);
+        const socketsInRoom = JSON.parse(socketsInRoomJsonString);
+        const [socket1Id, socket2Id] = socketsInRoom;
 
-      done();
-    }, function (err, ret) {
-    }, {});
+        const remainingSocketId = (socket1Id === ws.id) ? socket2Id : socket1Id;
+
+        multi.del(`room_id_to_socket_ids:${roomId}`);
+        multi.del(`socket_id_to_room_id:${ws.id}`);
+        multi.del(`socket_id_to_room_id:${remainingSocketId}`);
+
+        const execResult = await multi.exec();
+
+        if (!execResult) {
+          console.log(`error in removing from room ${roomId}`);
+        } else {
+          socketIdToSocket.delete(ws.id);
+          publisher.publish('data', JSON.stringify({ type: "send_message_to_id_and_reconnect", socket_id: remainingSocketId, message: JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }) }));
+        }
+      } else {
+        const listKey = roomType === PRIVATE_TEXT_CHAT_DUO ? DOUBLE_CHAT_ROOM_WAITING_PEOPLE_LIST : DOUBLE_VIDEO_CHAT_ROOM_WAITING_PEOPLE_LIST;
+        const waitingPeople = await redisClient.lRange(listKey, 0, -1);
+        const index = waitingPeople.indexOf(ws.id);
+        if (index !== -1) multi.lRem(listKey, 1, ws.id);
+
+        const execResult = await multi.exec();
+        if (!execResult) {
+          console.log(`error in removing from waiting list for ${roomType}`);
+        } else {
+          console.log(`removed from waiting list for ${roomType}`);
+          socketIdToSocket.delete(ws.id);
+        }
+      }
+    }
   } catch (error) {
     console.log('Error in handleDisconnect', error);
   }
@@ -380,3 +480,33 @@ const convertArrayBufferToString = (arrayBuffer) => {
   const decoder = new TextDecoder();
   return decoder.decode(arrayBuffer);
 }
+
+subscriber.subscribe('data', async (message) => {
+  const data = JSON.parse(message);
+  if (data.type === "send_message") {
+    const socket = socketIdToSocket.get(data.socket_id);
+    if (socket) {
+      socket.send(data.message);
+    }
+  } else if (data.type === "send_message_to_others") {
+    const socketsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${data.roomId}`);
+    let socketsInRoom = JSON.parse(socketsInRoomJsonString);
+
+    socketsInRoom.forEach(socketId => {
+      if (socketId !== data.socket_id) {
+        const socket = socketIdToSocket.get(socketId);
+
+        if (socket) {
+          socket.send(data.message);
+        }
+      }
+    });
+  } else if (data.type === "send_message_to_id_and_reconnect") {
+    const socket = socketIdToSocket.get(data.socket_id);
+
+    if (socket) {
+      socket.send(data.message);
+      reconnect(socket, true);
+    }
+  }
+});
