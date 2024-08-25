@@ -260,6 +260,8 @@ uWS.SSLApp({
   res.onAborted(() => {
     console.warn('Request Aborted');
   });
+}).get("/ping", (res, req) => {
+  res.writeStatus('200 OK').end('pong');
 }).any("/*", (res, req) => {
   res.writeStatus('404 Not Found')
     .writeHeader('Content-Type', 'application/json')
