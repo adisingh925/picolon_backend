@@ -43,7 +43,7 @@ const port = 443;
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 
-// rate limiter options for data transfer and API calls
+// rate limiter options for data transfer
 const opts = {
   points: 10,
   duration: 1,
