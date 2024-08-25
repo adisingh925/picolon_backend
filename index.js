@@ -143,11 +143,6 @@ uWS.SSLApp({
     });
   },
 
-  subscription: (ws, roomId) => {
-    // subscribed to the room
-    console.log('Subscribed to room', convertArrayBufferToString(roomId));
-  },
-
   open: (ws) => {
     reconnect(ws, true);
   },
@@ -204,6 +199,7 @@ uWS.SSLApp({
           res.end(connections.toString());
         });
       }).catch((error) => {
+        console.log('Error in getting connections', error);
         res.writeStatus('500 Internal Server Error').end();
       });
     } else {
@@ -220,7 +216,6 @@ uWS.SSLApp({
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
 
   apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
-    // Allowed origins
     const origin = req.getHeader('origin');
 
     // Set CORS headers
@@ -248,6 +243,7 @@ uWS.SSLApp({
           });
         })
         .catch((error) => {
+          console.log('Error in fetching public rooms', error);
           res.writeStatus('500 Internal Server Error').end();
         });
     } else {
@@ -260,18 +256,12 @@ uWS.SSLApp({
   res.onAborted(() => {
     console.warn('Request Aborted');
   });
-}).get("/ping", (res, req) => {
+}).get("/ping", (res, _req) => {
   res.writeStatus('200 OK').end('pong');
-}).any("/*", (res, req) => {
-  res.writeStatus('404 Not Found')
-    .writeHeader('Content-Type', 'application/json')
-    .end(JSON.stringify({
-      status: 404,
-      message: 'Not Found',
-      error: 'The requested resource was not found on this server.',
-    }));
-}).listen(port, (token) => {
-  console.log('Server is running on port', port);
+}).any("/*", (res, _req) => {
+  res.writeStatus('404 Not Found').end("404 Not Found");
+}).listen(port, (_token) => {
+  console.log('Server is listening on port', port);
 });
 
 const reconnect = async (ws, isConnected = false) => {
