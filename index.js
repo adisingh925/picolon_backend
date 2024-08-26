@@ -55,7 +55,7 @@ const rateLimiter = new RateLimiterMemory(opts);
 // Allowed roomId types
 const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
 
-uWS.SSLApp({
+uWS.App({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath
 }).ws('/', {
