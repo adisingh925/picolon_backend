@@ -65,7 +65,7 @@ uWS.App({
   idleTimeout: 10,
 
   upgrade: (res, req, context) => {
-    const address = convertArrayBufferToString(res.getRemoteAddressAsText());
+    const address = req.getHeader('X-Forwarded-For')
     const roomType = req.getQuery("RT");
     const roomName = req.getQuery("RN");
     const roomId = req.getQuery("RID");
