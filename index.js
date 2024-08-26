@@ -75,12 +75,17 @@ uWS.App({
 
     redisClient.incr(`ip_address_to_connection_count:${address}`).then((count) => {
       let countInt = parseInt(count);
-      if (isNaN(countInt)) {
-        countInt = 0;
-      }
-      if (countInt >= 3) {
-        res.cork(() => {
-          res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
+
+      if (countInt > 3) {
+        redisClient.decr(`ip_address_to_connection_count:${address}`).then(() => {
+          res.cork(() => {
+            res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
+          });
+        }).catch((error) => {
+          console.log('decrement_ip_count_error', error);
+          res.cork(() => {
+            res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
+          });
         });
         return;
       } else {
