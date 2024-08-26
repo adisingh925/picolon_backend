@@ -65,13 +65,15 @@ uWS.SSLApp({
   idleTimeout: 10,
 
   upgrade: (res, req, context) => {
-    const address = convertArrayBufferToString(res.getRemoteAddressAsText());
+    const address = req.getHeader('x-forwarded-for');
     const roomType = req.getQuery("RT");
     const roomName = req.getQuery("RN");
     const roomId = req.getQuery("RID");
     const websocketKey = req.getHeader('sec-websocket-key');
     const websocketProtocol = req.getHeader('sec-websocket-protocol');
     const websocketExtensions = req.getHeader('sec-websocket-extensions');
+
+    console.log('address', address);
 
     redisClient.incr(`ip_address_to_connection_count:${address}`).then((count) => {
       let countInt = parseInt(count);
