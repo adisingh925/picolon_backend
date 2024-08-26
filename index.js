@@ -73,8 +73,6 @@ uWS.App({
     const websocketProtocol = req.getHeader('sec-websocket-protocol');
     const websocketExtensions = req.getHeader('sec-websocket-extensions');
 
-    console.log('address', address);
-
     redisClient.incr(`ip_address_to_connection_count:${address}`).then((count) => {
       let countInt = parseInt(count);
       if (isNaN(countInt)) {
@@ -174,7 +172,7 @@ uWS.App({
 
   const origin = req.getHeader('origin');
 
-  const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
+  const clientIp = req.getHeader('x-forwarded-for')
   const isAllowed = await apiRateLimiter(clientIp);
 
   if (!isAllowed) {
@@ -216,7 +214,7 @@ uWS.App({
     });
   }
 }).get("/api/v1/public-text-chat-rooms", async (res, req) => {
-  const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
+  const clientIp = req.getHeader('x-forwarded-for')
   const isAllowed = await apiRateLimiter(clientIp);
 
   if (!isAllowed) {
