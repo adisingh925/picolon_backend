@@ -73,7 +73,7 @@ uWS.SSLApp({
     const websocketProtocol = req.getHeader('sec-websocket-protocol');
     const websocketExtensions = req.getHeader('sec-websocket-extensions');
 
-    redisClient.get(`ip_address_to_connection_count:${address}`).then((count) => {
+    redisClient.incr(`ip_address_to_connection_count:${address}`).then((count) => {
       let countInt = parseInt(count);
       if (isNaN(countInt)) {
         countInt = 0;
@@ -84,53 +84,47 @@ uWS.SSLApp({
         });
         return;
       } else {
-        redisClient.set(`ip_address_to_connection_count:${address}`, countInt + 1).then(() => {
-          if (!allowedRoomTypes.includes(roomType)) {
+        if (!allowedRoomTypes.includes(roomType)) {
+          res.cork(() => {
+            res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+          });
+          return;
+        }
+
+        if (roomName) {
+          if (typeof roomName !== 'string' || !(roomName.length > 0 && roomName.length <= 160)) {
             res.cork(() => {
               res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
             });
             return;
           }
+        }
 
-          if (roomName) {
-            if (typeof roomName !== 'string' || !(roomName.length > 0 && roomName.length <= 160)) {
-              res.cork(() => {
-                res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-              });
-              return;
-            }
+        if (roomId) {
+          if (typeof roomId !== 'string' || roomId.length !== 36) {
+            res.cork(() => {
+              res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+            });
+            return;
           }
+        }
 
-          if (roomId) {
-            if (typeof roomId !== 'string' || roomId.length !== 36) {
-              res.cork(() => {
-                res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
-              });
-              return;
-            }
+        if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
+          if (!roomName && !roomId) {
+            res.cork(() => { res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED); });
+            return;
           }
+        }
 
-          if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
-            if (!roomName && !roomId) {
-              res.cork(() => { res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED); });
-              return;
-            }
-          }
-
-          // Upgrade WebSocket connection
-          res.cork(() => {
-            res.upgrade(
-              { ip: address, roomType, roomName, roomId, id: websocketKey },
-              websocketKey,
-              websocketProtocol,
-              websocketExtensions,
-              context
-            );
-          });
-        }).catch((error) => {
-          console.log('update_ip_count_error', error);
-          res.cork(() => { res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED); });
-          return;
+        // Upgrade WebSocket connection
+        res.cork(() => {
+          res.upgrade(
+            { ip: address, roomType, roomName, roomId, id: websocketKey },
+            websocketKey,
+            websocketProtocol,
+            websocketExtensions,
+            context
+          );
         });
       }
     }).catch((error) => {
@@ -144,7 +138,8 @@ uWS.SSLApp({
     });
   },
 
-  open: (ws) => {
+  open: async (ws) => {
+    await redisClient.incr(connections);
     reconnect(ws, true);
   },
 
@@ -166,56 +161,58 @@ uWS.SSLApp({
   },
 
   close: async (ws, _code, _message) => {
-    const ip = ws.ip;
-    const count = await redisClient.get(`ip_address_to_connection_count:${ip}`);
-    const countInt = parseInt(count);
-    if (countInt > 0) {
-      await redisClient.set(`ip_address_to_connection_count:${ip}`, countInt - 1);
-      handleDisconnect(ws);
-    } else {
-      await redisClient.del(`ip_address_to_connection_count:${ip}`);
-    }
+    await redisClient.decr(connections);
+    handleDisconnect(ws);
   }
 }).get('/api/v1/connections', async (res, req) => {
+  res.onAborted(() => {
+    console.warn('Request Aborted');
+    return;
+  });
+
+  const origin = req.getHeader('origin');
+
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
   const isAllowed = await apiRateLimiter(clientIp);
 
   if (!isAllowed) {
-    res.writeStatus('429 Too Many Requests').end();
+    res.cork(() => {
+      res.writeStatus('429 Too Many Requests').end();
+    });
     return;
   }
 
-  const origin = req.getHeader('origin');
+  if (allowedOrigins.includes(origin) || 1) {
+    res.cork(() => {
+      res.writeHeader('Access-Control-Allow-Origin', origin);
+      res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (allowedOrigins.includes(origin)) {
-    res.writeHeader('Access-Control-Allow-Origin', origin);
-    res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    // Security headers
-    res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
-    res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    res.writeHeader('X-Content-Type-Options', 'nosniff');
-    res.writeHeader('X-Frame-Options', 'DENY');
-    res.writeHeader('X-XSS-Protection', '1; mode=block');
-    res.writeHeader('Referrer-Policy', 'no-referrer');
-    res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+      // Security headers
+      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      res.writeHeader('X-Content-Type-Options', 'nosniff');
+      res.writeHeader('X-Frame-Options', 'DENY');
+      res.writeHeader('X-XSS-Protection', '1; mode=block');
+      res.writeHeader('Referrer-Policy', 'no-referrer');
+      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+    });
 
     redisClient.get(connections).then((connections) => {
       res.cork(() => {
-        res.end(connections.toString());
+        res.end(connections);
       });
     }).catch((error) => {
       console.log('Error in getting connections', error);
-      res.writeStatus('500 Internal Server Error').end();
+      res.cork(() => {
+        res.writeStatus('500 Internal Server Error').end();
+      });
     });
   } else {
-    res.writeStatus('403 Forbidden').end();
+    res.cork(() => {
+      res.writeStatus('403 Forbidden').end();
+    });
   }
-
-  res.onAborted(() => {
-    console.warn('Request Aborted');
-  });
 }).get("/api/v1/public-text-chat-rooms", async (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
   const isAllowed = await apiRateLimiter(clientIp);
@@ -274,10 +271,6 @@ const reconnect = async (ws, isConnected = false) => {
   try {
     await redisClient.watch(`socket_id_to_room_id:${ws.id}`);
     const multi = redisClient.multi();
-
-    if (isConnected) {
-      multi.incr(connections);
-    }
 
     const roomType = ws.roomType;
     multi.set(`socket_id_to_room_type:${ws.id}`, roomType);
@@ -398,7 +391,7 @@ const handleDisconnect = async (ws) => {
     await redisClient.watch(`socket_id_to_room_id:${ws.id}`);
     const multi = redisClient.multi();
 
-    multi.decr(connections);
+    multi.decr(`ip_address_to_connection_count:${ws.ip}`);
 
     const roomId = await redisClient.get(`socket_id_to_room_id:${ws.id}`);
     const roomType = await redisClient.get(`socket_id_to_room_type:${ws.id}`);
@@ -480,32 +473,36 @@ const convertArrayBufferToString = (arrayBuffer) => {
 }
 
 subscriber.subscribe('data', async (message) => {
-  const data = JSON.parse(message);
-  if (data.type === "send_message") {
-    const socket = socketIdToSocket.get(data.socket_id);
-    if (socket) {
-      socket.send(data.message);
-    }
-  } else if (data.type === "send_message_to_others") {
-    const socketsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${data.roomId}`);
-    let socketsInRoom = JSON.parse(socketsInRoomJsonString);
-
-    socketsInRoom.forEach(socketId => {
-      if (socketId !== data.socket_id) {
-        const socket = socketIdToSocket.get(socketId);
-
-        if (socket) {
-          socket.send(data.message);
-        }
+  try {
+    const data = JSON.parse(message);
+    if (data.type === "send_message") {
+      const socket = socketIdToSocket.get(data.socket_id);
+      if (socket) {
+        socket.send(data.message);
       }
-    });
-  } else if (data.type === "send_message_to_id_and_reconnect") {
-    const socket = socketIdToSocket.get(data.socket_id);
+    } else if (data.type === "send_message_to_others") {
+      const socketsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${data.roomId}`);
+      let socketsInRoom = JSON.parse(socketsInRoomJsonString);
 
-    if (socket) {
-      socket.send(data.message);
-      reconnect(socket, true);
+      socketsInRoom.forEach(socketId => {
+        if (socketId !== data.socket_id) {
+          const socket = socketIdToSocket.get(socketId);
+
+          if (socket) {
+            socket.send(data.message);
+          }
+        }
+      });
+    } else if (data.type === "send_message_to_id_and_reconnect") {
+      const socket = socketIdToSocket.get(data.socket_id);
+
+      if (socket) {
+        socket.send(data.message);
+        reconnect(socket, true);
+      }
     }
+  } catch (error) {
+    console.log('Error in handling message', error.message);
   }
 });
 
