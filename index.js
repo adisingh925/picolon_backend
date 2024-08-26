@@ -55,7 +55,7 @@ const rateLimiter = new RateLimiterMemory(opts);
 // Allowed roomId types
 const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
 
-uWS.App({
+uWS.SSLApp({
   key_file_name: keyFilePath,
   cert_file_name: certFilePath
 }).ws('/', {
@@ -65,7 +65,7 @@ uWS.App({
   idleTimeout: 10,
 
   upgrade: (res, req, context) => {
-    const address = req.getHeader('x-forwarded-for');
+    const address = convertArrayBufferToString(res.getRemoteAddressAsText());
     const roomType = req.getQuery("RT");
     const roomName = req.getQuery("RN");
     const roomId = req.getQuery("RID");
