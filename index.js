@@ -249,7 +249,8 @@ uWS.App({
       res.writeHeader('Referrer-Policy', 'no-referrer');
       res.writeHeader('Permissions-Policy', 'geolocation=(self)');
 
-      res.end();
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({}));
     });
   } else {
     res.cork(() => {
