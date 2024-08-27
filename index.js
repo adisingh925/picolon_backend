@@ -250,7 +250,7 @@ uWS.App({
       res.writeHeader('Permissions-Policy', 'geolocation=(self)');
 
       res.writeHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({}));
+      res.end(JSON.stringify([]));
     });
   } else {
     res.cork(() => {
