@@ -385,8 +385,6 @@ const reconnect = async (ws) => {
         const execResult = await multi.exec();
         if (!execResult) {
           console.log(`error in adding to waiting list for ${roomType}`);
-        } else {
-          console.log(`added to waiting list for ${roomType}`);
         }
       }
     }
