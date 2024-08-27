@@ -167,6 +167,7 @@ uWS.App({
 
   close: async (ws, _code, _message) => {
     await redisClient.decr(connections);
+    await redisClient.decr(`ip_address_to_connection_count:${ws.ip}`);
     handleDisconnect(ws);
   }
 }).get('/api/v1/connections', async (res, req) => {
@@ -388,8 +389,6 @@ const handleDisconnect = async (ws) => {
   try {
     await redisClient.watch(`socket_id_to_room_id:${ws.id}`);
     const multi = redisClient.multi();
-
-    multi.decr(`ip_address_to_connection_count:${ws.ip}`);
 
     const roomId = await redisClient.get(`socket_id_to_room_id:${ws.id}`);
     const roomType = await redisClient.get(`socket_id_to_room_type:${ws.id}`);
