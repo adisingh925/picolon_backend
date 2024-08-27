@@ -176,7 +176,6 @@ uWS.App({
   });
 
   const origin = req.getHeader('origin');
-
   const clientIp = req.getHeader('x-forwarded-for')
   const isAllowed = await apiRateLimiter(clientIp);
 
@@ -219,51 +218,44 @@ uWS.App({
     });
   }
 }).get("/api/v1/public-text-chat-rooms", async (res, req) => {
-  const clientIp = req.getHeader('x-forwarded-for')
-  const isAllowed = await apiRateLimiter(clientIp);
-
-  if (!isAllowed) {
-    res.writeStatus('429 Too Many Requests').end();
-    return;
-  }
-
-  const origin = req.getHeader('origin');
-
-  // Set CORS headers
-  if (allowedOrigins.includes(origin)) {
-    res.writeHeader('Access-Control-Allow-Origin', origin);
-    res.writeHeader('Access-Control-Allow-Methods', 'GET');
-    res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    // Security headers
-    res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
-    res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    res.writeHeader('X-Content-Type-Options', 'nosniff');
-    res.writeHeader('X-Frame-Options', 'DENY');
-    res.writeHeader('X-XSS-Protection', '1; mode=block');
-    res.writeHeader('Referrer-Policy', 'no-referrer');
-    res.writeHeader('Permissions-Policy', 'geolocation=(self)');
-
-    // Handle GET requests
-    redisClient.hGetAll("public_room_id_to_room_data")
-      .then((rooms) => {
-        const roomValues = Object.values(rooms);
-        res.cork(() => {
-          res.writeHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify(roomValues));
-        });
-      })
-      .catch((error) => {
-        console.log('Error in fetching public rooms', error);
-        res.writeStatus('500 Internal Server Error').end();
-      });
-  } else {
-    res.writeStatus('403 Forbidden').end();
-  }
-
   res.onAborted(() => {
     console.warn('Request Aborted');
   });
+
+  const clientIp = req.getHeader('x-forwarded-for')
+  const origin = req.getHeader('origin');
+  const isAllowed = await apiRateLimiter(clientIp);
+
+  if (!isAllowed) {
+    res.cork(() => {
+      res.writeStatus('429 Too Many Requests').end();
+    });
+    return;
+  }
+
+  // Set CORS headers
+  if (allowedOrigins.includes(origin)) {
+    res.cork(() => {
+      res.writeHeader('Access-Control-Allow-Origin', origin);
+      res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      // Security headers
+      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      res.writeHeader('X-Content-Type-Options', 'nosniff');
+      res.writeHeader('X-Frame-Options', 'DENY');
+      res.writeHeader('X-XSS-Protection', '1; mode=block');
+      res.writeHeader('Referrer-Policy', 'no-referrer');
+      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+
+      res.end();
+    });
+  } else {
+    res.cork(() => {
+      res.writeStatus('403 Forbidden').end();
+    });
+  }
 }).get("/ping", (res, _req) => {
   res.writeStatus('200 OK').end('pong');
 }).any("/*", (res, _req) => {
