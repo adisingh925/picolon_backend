@@ -187,7 +187,7 @@ uWS.App({
     return;
   }
 
-  if (allowedOrigins.includes(origin) || 1) {
+  if (allowedOrigins.includes(origin)) {
     res.cork(() => {
       res.writeHeader('Access-Control-Allow-Origin', origin);
       res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
