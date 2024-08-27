@@ -76,7 +76,7 @@ uWS.App({
     redisClient.incr(`ip_address_to_connection_count:${address}`).then((count) => {
       let countInt = parseInt(count);
 
-      if (countInt > 3) {
+      if (countInt > 300) {
         redisClient.decr(`ip_address_to_connection_count:${address}`).then(() => {
           res.cork(() => {
             res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
@@ -145,7 +145,7 @@ uWS.App({
 
   open: async (ws) => {
     await redisClient.incr(connections);
-    reconnect(ws, true);
+    reconnect(ws);
   },
 
   message: (ws, message, _isBinary) => {
@@ -165,8 +165,8 @@ uWS.App({
     console.log('WebSocket backpressure: ' + ws.getBufferedAmount());
   },
 
-  close: async (ws, _code, _message) => {
-    await redisClient.decr(connections);
+  close: (ws, _code, _message) => {
+    // await redisClient.decr(connections);
     handleDisconnect(ws);
   }
 }).get('/api/v1/connections', async (res, req) => {
@@ -265,7 +265,7 @@ uWS.App({
   console.log('Server is listening on port', port);
 });
 
-const reconnect = async (ws, isConnected = false) => {
+const reconnect = async (ws) => {
   try {
     await redisClient.watch(`socket_id_to_room_id:${ws.id}`);
     const multi = redisClient.multi();
@@ -496,7 +496,7 @@ subscriber.subscribe('data', async (message) => {
 
       if (socket) {
         socket.send(data.message);
-        reconnect(socket, true);
+        reconnect(socket);
       }
     }
   } catch (error) {
