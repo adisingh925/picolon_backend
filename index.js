@@ -76,7 +76,7 @@ uWS.App({
     redisClient.incr(`ip_address_to_connection_count:${address}`).then((count) => {
       let countInt = parseInt(count);
 
-      if (countInt > 300) {
+      if (countInt > 3) {
         redisClient.decr(`ip_address_to_connection_count:${address}`).then(() => {
           res.cork(() => {
             res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
@@ -165,8 +165,8 @@ uWS.App({
     console.log('WebSocket backpressure: ' + ws.getBufferedAmount());
   },
 
-  close: (ws, _code, _message) => {
-    // await redisClient.decr(connections);
+  close: async (ws, _code, _message) => {
+    await redisClient.decr(connections);
     handleDisconnect(ws);
   }
 }).get('/api/v1/connections', async (res, req) => {
