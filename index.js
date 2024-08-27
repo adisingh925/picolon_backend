@@ -144,6 +144,8 @@ uWS.App({
   },
 
   open: async (ws) => {
+    socketIdToSocket.set(ws.id, ws);
+
     redisClient.incr(connections).then(() => {
       reconnect(ws);
     }).catch((error) => {
@@ -169,6 +171,8 @@ uWS.App({
   },
 
   close: async (ws, _code, _message) => {
+    socketIdToSocket.delete(ws.id);
+
     redisClient.decr(connections).then(() => {
       redisClient.decr(`ip_address_to_connection_count:${ws.ip}`).then(() => {
         handleDisconnect(ws);
@@ -286,7 +290,6 @@ const reconnect = async (ws) => {
     if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
       if (ws.roomName) {
         const roomId = uuidv4();
-        socketIdToSocket.set(ws.id, ws);
 
         multi.set(`socket_id_to_room_id:${ws.id}`, roomId);
         multi.set(`room_id_to_socket_ids:${roomId}`, JSON.stringify([ws.id]));
@@ -320,7 +323,6 @@ const reconnect = async (ws) => {
           const socketIdsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${ws.roomId}`);
           const socketIdsInRoom = JSON.parse(socketIdsInRoomJsonString);
           socketIdsInRoom.push(ws.id);
-          socketIdToSocket.set(ws.id, ws);
 
           roomData.connections++;
 
@@ -349,7 +351,6 @@ const reconnect = async (ws) => {
     } else {
       let waitingListKey = roomType === PRIVATE_TEXT_CHAT_DUO ? DOUBLE_CHAT_ROOM_WAITING_PEOPLE_LIST : DOUBLE_VIDEO_CHAT_ROOM_WAITING_PEOPLE_LIST;
       const peerSocketId = await redisClient.lIndex(waitingListKey, 0);
-      socketIdToSocket.set(ws.id, ws);
 
       if (peerSocketId) {
         const roomId = uuidv4();
@@ -409,7 +410,6 @@ const handleDisconnect = async (ws) => {
 
         if (socketsInRoom) {
           socketsInRoom = socketsInRoom.filter(id => id !== ws.id);
-          socketIdToSocket.delete(ws.id);
 
           if (socketsInRoom.length === 0) {
             multi.del(`room_id_to_socket_ids:${roomId}`);
@@ -450,7 +450,6 @@ const handleDisconnect = async (ws) => {
         if (!execResult) {
           console.log(`error in removing from room ${roomId}`);
         } else {
-          socketIdToSocket.delete(ws.id);
           publisher.publish('data', JSON.stringify({ type: "send_message_to_id_and_reconnect", socket_id: remainingSocketId, message: JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }) }));
         }
       } else {
@@ -462,8 +461,6 @@ const handleDisconnect = async (ws) => {
         const execResult = await multi.exec();
         if (!execResult) {
           console.log(`error in removing from waiting list for ${roomType}`);
-        } else {
-          socketIdToSocket.delete(ws.id);
         }
       }
     }
