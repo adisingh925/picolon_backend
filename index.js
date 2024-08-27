@@ -144,8 +144,11 @@ uWS.App({
   },
 
   open: async (ws) => {
-    await redisClient.incr(connections);
-    reconnect(ws);
+    redisClient.incr(connections).then(() => {
+      reconnect(ws);
+    }).catch((error) => {
+      console.log('Error in incrementing connections', error);
+    });
   },
 
   message: (ws, message, _isBinary) => {
@@ -166,9 +169,15 @@ uWS.App({
   },
 
   close: async (ws, _code, _message) => {
-    await redisClient.decr(connections);
-    await redisClient.decr(`ip_address_to_connection_count:${ws.ip}`);
-    handleDisconnect(ws);
+    redisClient.decr(connections).then(() => {
+      redisClient.decr(`ip_address_to_connection_count:${ws.ip}`).then(() => {
+        handleDisconnect(ws);
+      }).catch((error) => {
+        console.log('Error in decrementing ip_address_to_connection_count', error);
+      });
+    }).catch((error) => {
+      console.log('Error in decrementing connections', error);
+    });
   }
 }).get('/api/v1/connections', async (res, req) => {
   res.onAborted(() => {
@@ -454,7 +463,6 @@ const handleDisconnect = async (ws) => {
         if (!execResult) {
           console.log(`error in removing from waiting list for ${roomType}`);
         } else {
-          console.log(`removed from waiting list for ${roomType}`);
           socketIdToSocket.delete(ws.id);
         }
       }
