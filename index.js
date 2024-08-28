@@ -348,7 +348,7 @@ const reconnect = async (ws) => {
           return;
         }
       }
-    } else {
+    } else if (roomType === PRIVATE_TEXT_CHAT_DUO || roomType === PRIVATE_VIDEO_CHAT_DUO) {
       let waitingListKey = roomType === PRIVATE_TEXT_CHAT_DUO ? DOUBLE_CHAT_ROOM_WAITING_PEOPLE_LIST : DOUBLE_VIDEO_CHAT_ROOM_WAITING_PEOPLE_LIST;
       const peerSocketId = await redisClient.lIndex(waitingListKey, 0);
 
@@ -399,7 +399,13 @@ const handleDisconnect = async (ws) => {
     const multi = redisClient.multi();
 
     const roomId = await redisClient.get(`socket_id_to_room_id:${ws.id}`);
+
+    if (roomId) {
+      multi.del(`socket_id_to_room_id:${ws.id}`);
+    }
+
     const roomType = await redisClient.get(`socket_id_to_room_type:${ws.id}`);
+    multi.del(`socket_id_to_room_type:${ws.id}`);
 
     if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
       if (roomId) {
@@ -418,8 +424,6 @@ const handleDisconnect = async (ws) => {
             roomData.connections--;
             multi.set(roomType === PRIVATE_TEXT_CHAT_MULTI ? `private_room_id_to_room_data:${roomId}` : `public_room_id_to_room_data:${roomId}`, JSON.stringify(roomData));
             multi.set(`room_id_to_socket_ids:${roomId}`, JSON.stringify(socketsInRoom));
-            multi.del(`socket_id_to_room_type:${ws.id}`);
-            multi.del(`socket_id_to_room_id:${ws.id}`);
 
             const execResult = await multi.exec();
 
@@ -431,7 +435,7 @@ const handleDisconnect = async (ws) => {
           }
         }
       }
-    } else {
+    } else if (roomType === PRIVATE_TEXT_CHAT_DUO || roomType === PRIVATE_VIDEO_CHAT_DUO) {
       if (roomId) {
         const socketsInRoomJsonString = await redisClient.get(`room_id_to_socket_ids:${roomId}`);
         const socketsInRoom = JSON.parse(socketsInRoomJsonString);
@@ -440,13 +444,13 @@ const handleDisconnect = async (ws) => {
         const remainingSocketId = (socket1Id === ws.id) ? socket2Id : socket1Id;
 
         multi.del(`room_id_to_socket_ids:${roomId}`);
-        multi.del(`socket_id_to_room_id:${ws.id}`);
         multi.del(`socket_id_to_room_id:${remainingSocketId}`);
 
         const execResult = await multi.exec();
 
         if (!execResult) {
-          console.log(`error in removing from room ${roomId}`);
+          console.log(`error in disconnecting from duo room, retrying...`);
+          handleDisconnect(ws);
         } else {
           publisher.publish('data', JSON.stringify({ type: "send_message_to_id_and_reconnect", socket_id: remainingSocketId, message: JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }) }));
         }
@@ -461,6 +465,8 @@ const handleDisconnect = async (ws) => {
           console.log(`error in removing from waiting list for ${roomType}`);
         }
       }
+    } else {
+      multi.discard();
     }
   } catch (error) {
     console.log('Error in handleDisconnect', error);
