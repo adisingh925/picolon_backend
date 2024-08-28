@@ -18,7 +18,7 @@ const PRIVATE_TEXT_CHAT_MULTI = '3';
 // server broadcast messages
 const CONNECTION_LIMIT_EXCEEDED = 'connection_limit_exceeded';
 const RATE_LIMIT_EXCEEDED = 'rate_limit_exceeded';
-const CONNECTION_REJECTED = 'connection_rejected';
+const ACCESS_DENIED = 'access_denied';
 const STRANGER_DISCONNECTED_FROM_THE_ROOM = 'stranger_disconnected_from_the_room';
 const YOU_ARE_CONNECTED_TO_THE_ROOM = 'you_are_connected_to_the_room';
 const STRANGER_CONNECTED_TO_THE_ROOM = 'stranger_connected_to_the_room';
@@ -87,25 +87,25 @@ uWS.SSLApp({
 
     const roomType = req.getQuery("RT");
     if (!allowedRoomTypes.includes(roomType)) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
       return;
     }
 
     const roomName = req.getQuery("RN");
     if (roomName && typeof roomName !== 'string' && roomName.length > 0 && roomName.length <= 160) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
       return;
     }
 
     const roomId = req.getQuery("RID");
     if (roomId && typeof roomId !== 'string' && roomId.length === 36) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
       return;
     }
 
     if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
       if (!roomName && !roomId) {
-        res.writeStatus('403 Forbidden').end(CONNECTION_REJECTED);
+        res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
         return;
       }
     }
@@ -120,19 +120,15 @@ uWS.SSLApp({
     );
   },
 
-  subscription: (ws, roomId) => {
-    // subscribed to the room
-  },
-
   open: (ws) => {
     reconnect(ws, true);
   },
 
-  message: (ws, message, isBinary) => {
-    rateLimiter.consume(ws.id, 1).then((rateLimiterRes) => {
+  message: (ws, message, _isBinary) => {
+    rateLimiter.consume(ws.id, 1).then((_rateLimiterRes) => {
       const roomId = socketIdToRoomId.get(ws.id);
       if (roomId) ws.publish(roomId, message);
-    }).catch((rateLimiterRes) => {
+    }).catch((_rateLimiterRes) => {
       ws.send(JSON.stringify({ type: RATE_LIMIT_EXCEEDED }));
     });
   },
@@ -141,7 +137,7 @@ uWS.SSLApp({
     console.log('WebSocket backpressure: ' + ws.getBufferedAmount());
   },
 
-  close: (ws, code, message) => {
+  close: (ws, _code, _message) => {
     const ip = ws.ip;
     const currentCount = connectionsPerIp.get(ip);
     if (currentCount > 1) {
@@ -154,7 +150,7 @@ uWS.SSLApp({
   }
 }).get('/api/v1/connections', (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
-  apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
+  apiCallRateLimiter.consume(clientIp).then((_rateLimiterRes) => {
     const origin = req.getHeader('origin');
 
     if (allowedOrigins.includes(origin)) {
@@ -173,19 +169,17 @@ uWS.SSLApp({
 
       res.end(connections.toString());
     } else {
-      res.writeStatus('403 Forbidden').end();
+      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
     }
-  }).catch((rateLimiterRes) => {
-    res.writeStatus('429 Too Many Requests').end();
+  }).catch((_rateLimiterRes) => {
+    res.writeStatus('429 Too Many Requests').end(RATE_LIMIT_EXCEEDED);
   });
 }).get("/api/v1/public-text-chat-rooms", (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
 
-  apiCallRateLimiter.consume(clientIp).then((rateLimiterRes) => {
-    // Allowed origins
+  apiCallRateLimiter.consume(clientIp).then((_rateLimiterRes) => {
     const origin = req.getHeader('origin');
 
-    // Set CORS headers
     if (allowedOrigins.includes(origin)) {
       res.writeHeader('Access-Control-Allow-Origin', origin);
       res.writeHeader('Access-Control-Allow-Methods', 'GET');
@@ -204,20 +198,14 @@ uWS.SSLApp({
       const rooms = Array.from(publicRoomIdToRoomData.values());
       res.end(JSON.stringify(rooms));
     } else {
-      res.writeStatus('403 Forbidden').end();
+      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
     }
   }).catch((rateLimiterRes) => {
-    res.writeStatus('429 Too Many Requests').end();
+    res.writeStatus('429 Too Many Requests').end(RATE_LIMIT_EXCEEDED);
   });
-}).any("/*", (res, req) => {
-  res.writeStatus('404 Not Found')
-    .writeHeader('Content-Type', 'application/json')
-    .end(JSON.stringify({
-      status: 404,
-      message: 'Not Found',
-      error: 'The requested resource was not found on this server.',
-    }));
-}).listen(port, (token) => {
+}).any("/*", (res, _req) => {
+  res.writeStatus('404 Not Found').end('Resource Not Found');
+}).listen(port, (_token) => {
   console.log('Server is running on port', port);
 });
 
