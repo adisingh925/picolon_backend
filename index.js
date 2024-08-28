@@ -78,7 +78,7 @@ uWS.SSLApp({
     const address = convertArrayBufferToString(res.getRemoteAddressAsText());
 
     const ipCount = connectionsPerIp.get(address) || 0;
-    if (ipCount >= 10000000) {
+    if (ipCount >= 3) {
       res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
       return;
     } else {
