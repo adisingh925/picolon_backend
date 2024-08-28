@@ -310,6 +310,7 @@ const handleDisconnect = async (ws) => {
 
       const roomId = socketIdToRoomId.get(ws.id);
       const roomType = socketIdToRoomType.get(ws.id);
+      socketIdToRoomType.delete(ws.id);
 
       if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
         if (roomId) {
@@ -334,7 +335,6 @@ const handleDisconnect = async (ws) => {
             }
           }
 
-          socketIdToRoomType.delete(ws.id);
           socketIdToRoomId.delete(ws.id);
         }
       } else {
