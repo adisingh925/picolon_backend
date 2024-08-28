@@ -9,12 +9,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "async-lock": "^1.4.1",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
-    "forever": "^4.0.3",
     "nodemon": "^3.1.4",
     "rate-limiter-flexible": "^5.0.3",
-    "redis": "^4.7.0",
     "uuid": "^10.0.0",
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.44.0"
   },
