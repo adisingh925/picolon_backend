@@ -5,6 +5,7 @@ const lock = new AsyncLock();
 require('dotenv').config()
 const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
+const sendEmail = require('./Reporting/ErrorReporting');
 
 const WEBSITE_URL = "https://picolon.com";
 const allowedOrigins = [WEBSITE_URL];
@@ -17,8 +18,9 @@ const PRIVATE_TEXT_CHAT_MULTI = '3';
 
 // server broadcast messages
 const CONNECTION_LIMIT_EXCEEDED = 'connection_limit_exceeded';
-const RATE_LIMIT_EXCEEDED = 'rate_limit_exceeded';
-const ACCESS_DENIED = 'access_denied';
+const RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED';
+const ACCESS_DENIED = 'ACCESS_DENIED';
+const RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND';
 const STRANGER_DISCONNECTED_FROM_THE_ROOM = 'stranger_disconnected_from_the_room';
 const YOU_ARE_CONNECTED_TO_THE_ROOM = 'you_are_connected_to_the_room';
 const STRANGER_CONNECTED_TO_THE_ROOM = 'stranger_connected_to_the_room';
@@ -169,10 +171,18 @@ uWS.SSLApp({
 
       res.end(connections.toString());
     } else {
-      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
+      res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+        error: ACCESS_DENIED,
+        message: 'You do not have permission to access this resource.',
+        code: 403
+      }));
     }
   }).catch((_rateLimiterRes) => {
-    res.writeStatus('429 Too Many Requests').end(RATE_LIMIT_EXCEEDED);
+    res.writeStatus('429 Too Many Requests').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+      error: RATE_LIMIT_EXCEEDED,
+      message: 'You have exceeded the rate limit. Please try again later.',
+      code: 429
+    }));
   });
 }).get("/api/v1/public-text-chat-rooms", (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
@@ -198,13 +208,103 @@ uWS.SSLApp({
       const rooms = Array.from(publicRoomIdToRoomData.values());
       res.end(JSON.stringify(rooms));
     } else {
-      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
+      res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+        error: ACCESS_DENIED,
+        message: 'You do not have permission to access this resource.',
+        code: 403
+      }));
     }
   }).catch((rateLimiterRes) => {
-    res.writeStatus('429 Too Many Requests').end(RATE_LIMIT_EXCEEDED);
+    res.writeStatus('429 Too Many Requests').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+      error: RATE_LIMIT_EXCEEDED,
+      message: 'You have exceeded the rate limit. Please try again later.',
+      code: 429
+    }));
+  });
+}).post("/api/v1/report-error", (res, req) => {
+  res.onAborted(() => {
+    console.log('Request Aborted');
+  });
+
+  const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
+
+  apiCallRateLimiter.consume(clientIp).then((_rateLimiterRes) => {
+    const origin = req.getHeader('origin');
+
+    if (allowedOrigins.includes(origin)) {
+      res.writeHeader('Access-Control-Allow-Origin', origin);
+      res.writeHeader('Access-Control-Allow-Methods', 'POST');
+      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      // Security headers
+      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      res.writeHeader('X-Content-Type-Options', 'nosniff');
+      res.writeHeader('X-Frame-Options', 'DENY');
+      res.writeHeader('X-XSS-Protection', '1; mode=block');
+      res.writeHeader('Referrer-Policy', 'no-referrer');
+      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+
+      let buffer = Buffer.from('');
+
+      // Handle incoming data chunks
+      res.onData((chunk, isLast) => {
+        buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+
+        if (isLast) {
+          // Process the complete body
+          try {
+            const body = JSON.parse(buffer.toString());
+
+            sendEmail(
+              ["adisingh925@gmail.com"],
+              {
+                errorMessage: body.errorMessage,
+                timestamp: body.timestamp,
+                stackTrace: body.stackTrace,
+              },
+              body.errorMessage,
+              "Templates/error-report.hbs",
+              "error-reporting",
+              "Picolon UI Error Report"
+            );
+
+            res.writeStatus('200 OK');
+            res.writeHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              message: 'Error reported successfully',
+              code: 200
+            }));
+          } catch (e) {
+            res.writeStatus('400 Bad Request');
+            res.writeHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              error: 'Invalid JSON',
+              code: 400
+            }));
+          }
+        }
+      });
+    } else {
+      res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+        error: ACCESS_DENIED,
+        message: 'You do not have permission to access this resource.',
+        code: 403
+      }));
+    }
+  }).catch((rateLimiterRes) => {
+    res.writeStatus('429 Too Many Requests').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+      error: RATE_LIMIT_EXCEEDED,
+      message: 'You have exceeded the rate limit. Please try again later.',
+      code: 429
+    }));
   });
 }).any("/*", (res, _req) => {
-  res.writeStatus('404 Not Found').end('Resource Not Found');
+  res.writeStatus('404 Not Found').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+    error: RESOURCE_NOT_FOUND,
+    message: 'The requested resource could not be found.',
+    code: 404
+  }));
 }).listen(port, (_token) => {
   console.log('Server is running on port', port);
 });

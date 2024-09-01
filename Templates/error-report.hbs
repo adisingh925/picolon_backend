@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background-color: #e74c3c;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .content h2 {
+            color: #333;
+        }
+
+        .content p {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .content pre {
+            background-color: #f8f8f8;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', Courier, monospace;
+            color: #e74c3c;
+        }
+
+        .footer {
+            background-color: #2c3e50;
+            color: #fff;
+            padding: 10px;
+            text-align: center;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Error Report</h1>
+        </div>
+        <div class="content">
+            <h2>Error Details</h2>
+            <p><strong>Error Message :</strong> {{errorMessage}}</p>
+            <p><strong>Occurred at :</strong> {{timestamp}}</p>
+
+            <h2>Stack Trace</h2>
+            <pre>{{stackTrace}}</pre>
+        </div>
+        <div class="footer">
+            <p>&copy; 2024 picolon. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+
+</html>
