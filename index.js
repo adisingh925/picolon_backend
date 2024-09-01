@@ -16,15 +16,18 @@ const PRIVATE_VIDEO_CHAT_DUO = '1';
 const PUBLIC_TEXT_CHAT_MULTI = '2';
 const PRIVATE_TEXT_CHAT_MULTI = '3';
 
-// server broadcast messages
-const CONNECTION_LIMIT_EXCEEDED = 'connection_limit_exceeded';
+// server broadcast messages types
+const CONNECTION_LIMIT_EXCEEDED = 'CONNECTION_LIMIT_EXCEEDED';
 const RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED';
 const ACCESS_DENIED = 'ACCESS_DENIED';
 const RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND';
-const STRANGER_DISCONNECTED_FROM_THE_ROOM = 'stranger_disconnected_from_the_room';
-const YOU_ARE_CONNECTED_TO_THE_ROOM = 'you_are_connected_to_the_room';
-const STRANGER_CONNECTED_TO_THE_ROOM = 'stranger_connected_to_the_room';
-const ROOM_NOT_FOUND = 'room_not_found';
+const STRANGER_DISCONNECTED_FROM_THE_ROOM = 'STRANGER_DISCONNECTED_FROM_THE_ROOM';
+const YOU_ARE_CONNECTED_TO_THE_ROOM = 'YOU_ARE_CONNECTED_TO_THE_ROOM';
+const STRANGER_CONNECTED_TO_THE_ROOM = 'STRANGER_CONNECTED_TO_THE_ROOM';
+const ROOM_NOT_FOUND = 'ROOM_NOT_FOUND';
+const PAIRED = "PAIRED";
+const PEER_DISCONNECTED = "PEER_DISCONNECTED";
+const INITIATOR = "INITIATOR";
 
 // Maps to store necessary data
 const doubleChatRoomWaitingPeople = [];
@@ -383,12 +386,12 @@ const reconnect = async (ws, isConnected = false) => {
           rooms.set(roomId, { socket1: ws, socket2: peerSocket });
           socketIdToRoomId.set(ws.id, roomId);
           socketIdToRoomId.set(peerSocket.id, roomId);
-          const message = JSON.stringify({ type: 'paired', message: "You are connected to Stranger" });
+          const message = JSON.stringify({ type: PAIRED, message: "You are connected to Stranger" });
           ws.send(message);
           peerSocket.send(message);
 
           if (roomType === PRIVATE_VIDEO_CHAT_DUO) {
-            ws.send(JSON.stringify({ type: 'initiator', message: "You are the initiator!" }));
+            ws.send(JSON.stringify({ type: INITIATOR, message: "You are the initiator!" }));
           }
         } else {
           waitingPeople.push(ws);
@@ -442,7 +445,7 @@ const handleDisconnect = async (ws) => {
           const rooms = roomType === PRIVATE_TEXT_CHAT_DUO ? textChatDuoRoomIdToSockets : videoChatDuoRoomIdToSockets;
           const { socket1, socket2 } = rooms.get(roomId);
           const remainingSocket = (socket1.id === ws.id) ? socket2 : socket1;
-          remainingSocket.send(JSON.stringify({ type: 'peer_disconnected', message: "Your peer is disconnected" }));
+          remainingSocket.send(JSON.stringify({ type: PEER_DISCONNECTED, message: "Your peer is disconnected" }));
           rooms.delete(roomId);
           socketIdToRoomId.delete(ws.id);
           socketIdToRoomId.delete(remainingSocket.id);
