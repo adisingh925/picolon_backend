@@ -59,7 +59,7 @@ const opts = {
 };
 
 const APICallOptions = {
-  points: 1,
+  points: 3,
   duration: 1,
   blockDuration: 3,
 };
@@ -80,8 +80,14 @@ uWS.SSLApp({
   idleTimeout: 10,
 
   upgrade: (res, req, context) => {
+    /**
+     * Get the IP address of the client
+     */
     const address = convertArrayBufferToString(res.getRemoteAddressAsText());
 
+    /**
+     * Check if the client has exceeded the connection limit
+     */
     const ipCount = connectionsPerIp.get(address) || 0;
     if (ipCount >= 3) {
       res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
@@ -115,7 +121,9 @@ uWS.SSLApp({
       }
     }
 
-    // Upgrade WebSocket connection
+    /**
+     * Upgrade the connection to WebSocket
+     */
     res.upgrade(
       { ip: address, roomType, roomName, roomId, id: req.getHeader('sec-websocket-key') },
       req.getHeader('sec-websocket-key'),
@@ -125,10 +133,23 @@ uWS.SSLApp({
     );
   },
 
+  /**
+   * Handling new connection open event
+   * @param {*} ws 
+   */
   open: (ws) => {
+    /**
+     * Handle the connection open event
+     */
     reconnect(ws, true);
   },
 
+  /**
+   * Handling the incoming messages
+   * @param {*} ws 
+   * @param {*} message 
+   * @param {*} _isBinary 
+   */
   message: (ws, message, _isBinary) => {
     rateLimiter.consume(ws.id, 1).then((_rateLimiterRes) => {
       const roomId = socketIdToRoomId.get(ws.id);
@@ -138,10 +159,20 @@ uWS.SSLApp({
     });
   },
 
+  /**
+   * Handling the backpressure
+   * @param {*} ws 
+   */
   drain: (ws) => {
     console.log('WebSocket backpressure: ' + ws.getBufferedAmount());
   },
 
+  /**
+   * Handling the connection close event
+   * @param {*} ws 
+   * @param {*} _code 
+   * @param {*} _message 
+   */
   close: (ws, _code, _message) => {
     const ip = ws.ip;
     const currentCount = connectionsPerIp.get(ip);
@@ -155,6 +186,7 @@ uWS.SSLApp({
   }
 }).get('/api/v1/connections', (res, req) => {
   const clientIp = req.getHeader('x-forwarded-for') || req.getHeader('remote-address');
+
   apiCallRateLimiter.consume(clientIp).then((_rateLimiterRes) => {
     const origin = req.getHeader('origin');
 
@@ -195,7 +227,7 @@ uWS.SSLApp({
 
     if (allowedOrigins.includes(origin)) {
       res.writeHeader('Access-Control-Allow-Origin', origin);
-      res.writeHeader('Access-Control-Allow-Methods', 'GET');
+      res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
       res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
 
       // Security headers
@@ -217,7 +249,7 @@ uWS.SSLApp({
         code: 403
       }));
     }
-  }).catch((rateLimiterRes) => {
+  }).catch((_rateLimiterRes) => {
     res.writeStatus('429 Too Many Requests').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
       error: RATE_LIMIT_EXCEEDED,
       message: 'You have exceeded the rate limit. Please try again later.',
@@ -295,7 +327,7 @@ uWS.SSLApp({
         code: 403
       }));
     }
-  }).catch((rateLimiterRes) => {
+  }).catch((_rateLimiterRes) => {
     res.writeStatus('429 Too Many Requests').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
       error: RATE_LIMIT_EXCEEDED,
       message: 'You have exceeded the rate limit. Please try again later.',
@@ -350,22 +382,23 @@ const reconnect = async (ws, isConnected = false) => {
           if (roomData) {
             const socketsInRoom = textChatMultiRoomIdToSockets.get(ws.roomId);
             socketsInRoom.add(ws);
-            ws.subscribe(ws.roomId);
-            roomData.connections++;
-            ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
-
-            ws.publish(ws.roomId, JSON.stringify({
-              type: STRANGER_CONNECTED_TO_THE_ROOM,
-            }), false, true);
 
             socketIdToRoomId.set(ws.id, ws.roomId);
             textChatMultiRoomIdToSockets.set(ws.roomId, socketsInRoom);
+
+            roomData.connections++;
 
             if (roomType === PRIVATE_TEXT_CHAT_MULTI) {
               privateRoomIdToRoomData.set(ws.roomId, roomData);
             } else {
               publicRoomIdToRoomData.set(ws.roomId, roomData);
             }
+
+            ws.subscribe(ws.roomId);
+            ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
+            ws.publish(ws.roomId, JSON.stringify({
+              type: STRANGER_CONNECTED_TO_THE_ROOM,
+            }), false, true);
           } else {
             ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
             ws.close();
@@ -375,20 +408,21 @@ const reconnect = async (ws, isConnected = false) => {
         }
       } else {
         const waitingPeople = roomType === PRIVATE_TEXT_CHAT_DUO ? doubleChatRoomWaitingPeople : doubleVideoRoomWaitingPeople;
-        const peerSocket = waitingPeople.length > 0 ? waitingPeople.splice(Math.floor(Math.random() * waitingPeople.length), 1)[0] : null;
+        const peerSocket = waitingPeople.length > 0 ? waitingPeople.pop() : null;
 
         if (peerSocket) {
           const roomId = uuidv4();
-          peerSocket.subscribe(roomId);
-          ws.subscribe(roomId);
 
           const rooms = roomType === PRIVATE_TEXT_CHAT_DUO ? textChatDuoRoomIdToSockets : videoChatDuoRoomIdToSockets;
           rooms.set(roomId, { socket1: ws, socket2: peerSocket });
           socketIdToRoomId.set(ws.id, roomId);
           socketIdToRoomId.set(peerSocket.id, roomId);
-          const message = JSON.stringify({ type: PAIRED, message: "You are connected to Stranger" });
-          ws.send(message);
-          peerSocket.send(message);
+
+          peerSocket.subscribe(roomId);
+          ws.subscribe(roomId);
+
+          ws.send(JSON.stringify({ type: PAIRED, message: "You are connected to Stranger" }));
+          peerSocket.send(JSON.stringify({ type: PAIRED, message: "You are connected to Stranger" }));
 
           if (roomType === PRIVATE_VIDEO_CHAT_DUO) {
             ws.send(JSON.stringify({ type: INITIATOR, message: "You are the initiator!" }));
@@ -415,30 +449,28 @@ const handleDisconnect = async (ws) => {
       const roomType = socketIdToRoomType.get(ws.id);
       socketIdToRoomType.delete(ws.id);
 
-      if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
-        if (roomId) {
-          const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
+      if (roomId && (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI)) {
+        const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
+        socketIdToRoomId.delete(ws.id);
 
-          if (socketsInRoom) {
-            socketsInRoom.delete(ws);
+        if (socketsInRoom) {
+          socketsInRoom.delete(ws);
 
-            if (socketsInRoom.size === 0) {
-              textChatMultiRoomIdToSockets.delete(roomId);
-              roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.delete(roomId) : publicRoomIdToRoomData.delete(roomId);
-            } else {
-              let roomData = roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.get(roomId) : publicRoomIdToRoomData.get(roomId);
-              roomData.connections--;
-              roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.set(roomId, roomData) : publicRoomIdToRoomData.set(roomId, roomData);
-              textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
-              socketsInRoom.forEach(socket => {
-                socket.send(JSON.stringify({
-                  type: STRANGER_DISCONNECTED_FROM_THE_ROOM,
-                }));
-              });
-            }
+          if (socketsInRoom.size === 0) {
+            textChatMultiRoomIdToSockets.delete(roomId);
+            roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.delete(roomId) : publicRoomIdToRoomData.delete(roomId);
+          } else {
+            let roomData = roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.get(roomId) : publicRoomIdToRoomData.get(roomId);
+            roomData.connections--;
+            roomType === PRIVATE_TEXT_CHAT_MULTI ? privateRoomIdToRoomData.set(roomId, roomData) : publicRoomIdToRoomData.set(roomId, roomData);
+            textChatMultiRoomIdToSockets.set(roomId, socketsInRoom);
+
+            socketsInRoom.forEach(socket => {
+              socket.send(JSON.stringify({
+                type: STRANGER_DISCONNECTED_FROM_THE_ROOM,
+              }));
+            });
           }
-
-          socketIdToRoomId.delete(ws.id);
         }
       } else {
         if (roomId) {
