@@ -330,7 +330,7 @@ const reconnect = async (ws, isConnected = false) => {
       const roomType = ws.roomType;
       socketIdToRoomType.set(ws.id, roomType);
 
-      if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
+      if ([PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI].includes(roomType)) {
         if (ws.roomName) {
           const roomId = uuidv4();
           ws.subscribe(roomId);
@@ -429,7 +429,7 @@ const handleDisconnect = async (ws) => {
       const roomType = socketIdToRoomType.get(ws.id);
       socketIdToRoomType.delete(ws.id);
 
-      if (roomId && (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI)) {
+      if (roomId && ([PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI].includes(roomType))) {
         const socketsInRoom = textChatMultiRoomIdToSockets.get(roomId);
         socketIdToRoomId.delete(ws.id);
 
