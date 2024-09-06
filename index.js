@@ -6,6 +6,7 @@ require('dotenv').config()
 const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
 const sendEmail = require('./Reporting/ErrorReporting');
+const { validate: uuidValidate } = require('uuid');
 
 const WEBSITE_URL = "https://picolon.com";
 const allowedOrigins = [WEBSITE_URL];
@@ -17,7 +18,6 @@ const PUBLIC_TEXT_CHAT_MULTI = '2';
 const PRIVATE_TEXT_CHAT_MULTI = '3';
 
 // server broadcast messages types
-const CONNECTION_LIMIT_EXCEEDED = 'CONNECTION_LIMIT_EXCEEDED';
 const RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED';
 const ACCESS_DENIED = 'ACCESS_DENIED';
 const RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND';
@@ -86,14 +86,21 @@ uWS.SSLApp({
     const address = convertArrayBufferToString(res.getRemoteAddressAsText());
 
     /**
+     * Check if the IP address is valid
+     */
+    if (!validateIPAddress(address)) {
+      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
+      return;
+    }
+
+    /**
      * Check if the client has exceeded the connection limit
      */
     const ipCount = connectionsPerIp.get(address) || 0;
+
     if (ipCount >= 3) {
-      res.writeStatus('403 Forbidden').end(CONNECTION_LIMIT_EXCEEDED);
+      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
       return;
-    } else {
-      connectionsPerIp.set(address, ipCount + 1);
     }
 
     const roomType = req.getQuery("RT");
@@ -109,17 +116,19 @@ uWS.SSLApp({
     }
 
     const roomId = req.getQuery("RID");
-    if (roomId && typeof roomId !== 'string' && roomId.length === 36) {
+    if (roomId && typeof roomId !== 'string' && uuidValidate(roomId)) {
       res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
       return;
     }
 
-    if (roomType === PUBLIC_TEXT_CHAT_MULTI || roomType === PRIVATE_TEXT_CHAT_MULTI) {
+    if ([PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI].includes(roomType)) {
       if (!roomName && !roomId) {
         res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
         return;
       }
     }
+
+    connectionsPerIp.set(address, ipCount + 1);
 
     /**
      * Upgrade the connection to WebSocket
@@ -191,19 +200,7 @@ uWS.SSLApp({
     const origin = req.getHeader('origin');
 
     if (allowedOrigins.includes(origin)) {
-      res.writeHeader('Access-Control-Allow-Origin', origin);
-      res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-      // Security headers
-      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
-      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.writeHeader('X-Content-Type-Options', 'nosniff');
-      res.writeHeader('X-Frame-Options', 'DENY');
-      res.writeHeader('X-XSS-Protection', '1; mode=block');
-      res.writeHeader('Referrer-Policy', 'no-referrer');
-      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
-
+      setResponseHeaders(res, origin);
       res.end(connections.toString());
     } else {
       res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
@@ -226,20 +223,7 @@ uWS.SSLApp({
     const origin = req.getHeader('origin');
 
     if (allowedOrigins.includes(origin)) {
-      res.writeHeader('Access-Control-Allow-Origin', origin);
-      res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-      // Security headers
-      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
-      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.writeHeader('X-Content-Type-Options', 'nosniff');
-      res.writeHeader('X-Frame-Options', 'DENY');
-      res.writeHeader('X-XSS-Protection', '1; mode=block');
-      res.writeHeader('Referrer-Policy', 'no-referrer');
-      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
-
-      // Handle GET requests
+      setResponseHeaders(res, origin);
       const rooms = Array.from(publicRoomIdToRoomData.values());
       res.end(JSON.stringify(rooms));
     } else {
@@ -267,27 +251,14 @@ uWS.SSLApp({
     const origin = req.getHeader('origin');
 
     if (allowedOrigins.includes(origin)) {
-      res.writeHeader('Access-Control-Allow-Origin', origin);
-      res.writeHeader('Access-Control-Allow-Methods', 'POST');
-      res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-      // Security headers
-      res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
-      res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-      res.writeHeader('X-Content-Type-Options', 'nosniff');
-      res.writeHeader('X-Frame-Options', 'DENY');
-      res.writeHeader('X-XSS-Protection', '1; mode=block');
-      res.writeHeader('Referrer-Policy', 'no-referrer');
-      res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+      setResponseHeaders(res, origin);
 
       let buffer = Buffer.from('');
 
-      // Handle incoming data chunks
       res.onData((chunk, isLast) => {
         buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
 
         if (isLast) {
-          // Process the complete body
           try {
             const body = JSON.parse(buffer.toString());
 
@@ -344,6 +315,11 @@ uWS.SSLApp({
   console.log('Server is running on port', port);
 });
 
+/**
+ * Function to reconnect the client
+ * @param {*} ws 
+ * @param {*} isConnected 
+ */
 const reconnect = async (ws, isConnected = false) => {
   try {
     lock.acquire("reconnect", async (done) => {
@@ -440,6 +416,10 @@ const reconnect = async (ws, isConnected = false) => {
   }
 }
 
+/**
+ * Function to handle the disconnect event
+ * @param {*} ws 
+ */
 const handleDisconnect = async (ws) => {
   try {
     lock.acquire("disconnect", async (done) => {
@@ -499,7 +479,47 @@ const handleDisconnect = async (ws) => {
   }
 }
 
+/**
+ * Function to convert ArrayBuffer to string
+ * @param {*} arrayBuffer 
+ * @returns 
+ */
 const convertArrayBufferToString = (arrayBuffer) => {
   const decoder = new TextDecoder();
   return decoder.decode(arrayBuffer);
+}
+
+/**
+ * This function sets the response headers
+ * @param {*} res 
+ * @param {*} origin 
+ */
+function setResponseHeaders(res, origin) {
+  res.writeHeader('Access-Control-Allow-Origin', origin);
+  res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST');
+  res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Security headers
+  res.writeHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://picolon.com; script-src 'self'; style-src 'self';");
+  res.writeHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.writeHeader('X-Content-Type-Options', 'nosniff');
+  res.writeHeader('X-Frame-Options', 'DENY');
+  res.writeHeader('X-XSS-Protection', '1; mode=block');
+  res.writeHeader('Referrer-Policy', 'no-referrer');
+  res.writeHeader('Permissions-Policy', 'geolocation=(self)');
+}
+
+function validateIPAddress(ip) {
+  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+  const ipv6Regex = /^([\da-f]{1,4}:){7}[\da-f]{1,4}$/i;
+
+  if (ipv4Regex.test(ip)) {
+    return ip.split('.').every(part => parseInt(part) <= 255);
+  }
+
+  if (ipv6Regex.test(ip)) {
+    return ip.split(':').every(part => part.length <= 4);
+  }
+
+  return false;
 }
