@@ -53,7 +53,7 @@ const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 
 // rate limiter options for data transfer and API calls
 const opts = {
-  points: 30,
+  points: 50,
   duration: 1,
   blockDuration: 3,
 };
