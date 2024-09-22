@@ -5,7 +5,7 @@ const lock = new AsyncLock();
 require('dotenv').config()
 const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
-const sendEmail = require('./Reporting/ErrorReporting');
+const reporting = require('./Reporting/ErrorReporting');
 const { validate: uuidValidate } = require('uuid');
 
 const WEBSITE_URL = "https://picolon.com";
@@ -30,7 +30,7 @@ const PEER_DISCONNECTED = "PEER_DISCONNECTED";
 const INITIATOR = "INITIATOR";
 
 /** Max Connections Allowed From a Single IP */
-const MAX_CONNECTIONS_ALLOWED_FROM_SINGLE_IP = 100000;
+const MAX_CONNECTIONS_ALLOWED_FROM_SINGLE_IP = 3;
 
 /** Data Structures */
 const doubleChatRoomWaitingPeople = [];
@@ -118,7 +118,6 @@ uWS.SSLApp({
     }
 
     if ([PRIVATE_TEXT_CHAT_MULTI, PUBLIC_TEXT_CHAT_MULTI].includes(roomType)) {
-      console.log(roomName, roomId);
       if (roomName) {
         if (roomName.length <= 0 || roomName.length > 160) {
           res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
@@ -269,7 +268,7 @@ uWS.SSLApp({
 
               return;
             } else {
-              sendEmail.postToDiscord(body)
+              reporting.postToDiscord(body)
             }
 
             res.writeStatus('200 OK');
@@ -332,7 +331,6 @@ const reconnect = async (ws, isConnected = false) => {
       if ([PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI].includes(roomType)) {
         if (ws.roomName) {
           const roomId = uuidv4();
-          ws.subscribe(roomId);
           socketIdToRoomId.set(ws.id, roomId);
           textChatMultiRoomIdToSockets.set(roomId, new Set([ws]));
 
@@ -350,6 +348,7 @@ const reconnect = async (ws, isConnected = false) => {
             publicRoomIdToRoomData.set(roomId, roomData);
           }
 
+          ws.subscribe(roomId);
           ws.send(JSON.stringify({ type: YOU_ARE_CONNECTED_TO_THE_ROOM, roomData }));
         } else if (ws.roomId) {
           const roomData = roomType === PUBLIC_TEXT_CHAT_MULTI ? publicRoomIdToRoomData.get(ws.roomId) : privateRoomIdToRoomData.get(ws.roomId);
