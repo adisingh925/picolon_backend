@@ -419,7 +419,7 @@ const reconnect = async (ws, isConnected = false) => {
 const handleDisconnect = async (ws) => {
   try {
     lock.acquire("disconnect", async (done) => {
-      connections++;
+      connections--;
       connectionsPerIp.set(ws.ip, (connectionsPerIp.get(ws.ip) - 1));
       rateLimiter.delete(ws.id);
 
