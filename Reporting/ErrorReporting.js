@@ -1,49 +1,101 @@
-"use strict";
+const axios = require('axios');
 
-const nodemailer = require("nodemailer");
-const fs = require("fs");
-const handlebars = require("handlebars");
+async function postToDiscord(body) {
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    secure: true,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD,
-    },
-});
+    const USER_QUERY = 'user-query';
+    const SERVER_ERROR = 'server-error';
+    const UI_ERROR = 'ui-error';
 
-// async..await is not allowed in global scope, must use a wrapper
-async function sendEmail(
-    emailList,
-    templateData,
-    subject,
-    templatePath,
-    fromMail,
-    fromName
-) {
+    const webhookUrls = {
+        [USER_QUERY]: 'https://discord.com/api/webhooks/1287347063536881664/u34TvWxS61JYOuR7qWTles-G0c1rYSsmIjKg5C80tof37kt9pQ_gVIbb1FcX-xC7qlhu',
+        [SERVER_ERROR]: 'https://discord.com/api/webhooks/1287347180998492170/OV-TaYd2PzNXeAs5TcTBc5S7-43X6yXxi_qJzshUnV7XUO6lgbP7wGmUTjzpxqtLLLFD',
+        [UI_ERROR]: 'https://discord.com/api/webhooks/1287347257556992000/pOB7ELm64nAWTsrabjrx5r7kAyORNAE_xCEo3dm4_QVlAOPXSRLKG1I38yVCfFuuxWC0'
+    };
+
     try {
-        const source = fs.readFileSync(templatePath, { encoding: "utf-8" });
-        const template = handlebars.compile(source);
-        const html = template(templateData);
+        // Define the embed structure based on the type
+        let payload;
 
-        // send mail with defined transport object
-        const info = await transporter.sendMail({
-            from: `${fromName} ${fromMail}@picolon.com`, // sender address
-            to: emailList, // list of receivers
-            subject: subject, // Subject line
-            html: html,
-        });
+        switch (body.type) {
+            case USER_QUERY:
+                payload = {
+                    embeds: [
+                        {
+                            color: 3447003, // Blue color
+                            fields: [
+                                {
+                                    name: "Query",
+                                    value: `\`\`\`${body.message}\`\`\``
+                                }
+                            ],
+                            timestamp: new Date().toISOString()
+                        }
+                    ]
+                };
 
-        transporter.sendMail(info, function (err) {
-            if (err) {
-                console.error(err.message);
-            }
-        });
-    } catch (error) {
-        console.error(error.message);
+                break;
+
+            case SERVER_ERROR:
+                payload = {
+                    embeds: [
+                        {
+                            color: 16711680, // Red color for error
+                            fields: [
+                                {
+                                    name: "Error Message",
+                                    value: `\`\`\`${body.message}\`\`\``
+                                },
+                                {
+                                    name: "Stack Trace",
+                                    value: `\`\`\`${body.stackTrace || "No stack trace available"}\`\`\``
+                                }
+                            ],
+                            timestamp: new Date().toISOString()
+                        }
+                    ]
+                };
+
+                break;
+
+            case UI_ERROR:
+                payload = {
+                    embeds: [
+                        {
+                            color: 16711680, // Yellow color for warning
+                            fields: [
+                                {
+                                    name: "Error Message",
+                                    value: `\`\`\`${body.message}\`\`\``
+                                },
+                                {
+                                    name: "Stack Trace",
+                                    value: `\`\`\`${body.stackTrace || "No stack trace available"}\`\`\``
+                                }
+                            ],
+                            timestamp: new Date().toISOString()
+                        }
+                    ]
+                };
+
+                break;
+
+            default:
+                throw new Error("Invalid message type. Use 'user-queries', 'server-error', or 'ui-error'.");
+        }
+
+        // Send the payload to the Discord webhook
+        if (payload.message !== undefined && payload.message !== null && payload.message.trim().length > 0) {
+            await axios.post(webhookUrls[body.type], payload);
+            console.log(`${body.type} posted to Discord successfully.`);
+        } else {
+            console.log('No message to post to Discord');
+        }
+    } catch (postError) {
+        console.error('Failed to post to Discord:', postError);
     }
 }
 
-module.exports = sendEmail;
+// Export the function for use in other modules
+module.exports = {
+    postToDiscord
+};

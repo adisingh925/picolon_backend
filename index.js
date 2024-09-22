@@ -69,6 +69,7 @@ const apiCallRateLimiter = new RateLimiterMemory(APICallOptions);
 
 // Allowed roomId types
 const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
+const allowedReportingTypes = ['user-query', 'server-error', 'ui-error'];
 
 uWS.SSLApp({
   key_file_name: keyFilePath,
@@ -128,8 +129,6 @@ uWS.SSLApp({
       }
     }
 
-    connectionsPerIp.set(address, ipCount + 1);
-
     /**
      * Upgrade the connection to WebSocket
      */
@@ -183,14 +182,6 @@ uWS.SSLApp({
    * @param {*} _message 
    */
   close: (ws, _code, _message) => {
-    const ip = ws.ip;
-    const currentCount = connectionsPerIp.get(ip);
-    if (currentCount > 1) {
-      connectionsPerIp.set(ip, currentCount - 1);
-    } else {
-      connectionsPerIp.delete(ip);
-    }
-
     handleDisconnect(ws);
   }
 }).get('/api/v1/connections', (res, req) => {
@@ -240,7 +231,7 @@ uWS.SSLApp({
       code: 429
     }));
   });
-}).post("/api/v1/report-error", (res, req) => {
+}).post("/api/v1/reporting", (res, req) => {
   res.onAborted(() => {
     console.log('Request Aborted');
   });
@@ -262,18 +253,18 @@ uWS.SSLApp({
           try {
             const body = JSON.parse(buffer.toString());
 
-            sendEmail(
-              ["adisingh925@gmail.com"],
-              {
-                errorMessage: body.errorMessage,
-                timestamp: body.timestamp,
-                stackTrace: body.stackTrace,
-              },
-              body.errorMessage,
-              "Templates/error-report.hbs",
-              "error-reporting",
-              "Picolon UI Error Report"
-            );
+            if (body.type && !allowedReportingTypes.includes(body.type)) {
+              res.writeStatus('400 Bad Request');
+              res.writeHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({
+                error: 'Invalid JSON',
+                code: 400
+              }));
+
+              return;
+            } else {
+              sendEmail.postToDiscord(body)
+            }
 
             res.writeStatus('200 OK');
             res.writeHeader('Content-Type', 'application/json');
@@ -323,8 +314,10 @@ uWS.SSLApp({
 const reconnect = async (ws, isConnected = false) => {
   try {
     lock.acquire("reconnect", async (done) => {
+
       if (isConnected) {
         connections++;
+        connectionsPerIp.set(ws.ip, (connectionsPerIp.get(ws.ip) || 0) + 1);
       }
 
       const roomType = ws.roomType;
@@ -423,7 +416,9 @@ const reconnect = async (ws, isConnected = false) => {
 const handleDisconnect = async (ws) => {
   try {
     lock.acquire("disconnect", async (done) => {
-      --connections;
+      connections++;
+      connectionsPerIp.set(ws.ip, (connectionsPerIp.get(ws.ip) - 1));
+      rateLimiter.delete(ws.id);
 
       const roomId = socketIdToRoomId.get(ws.id);
       const roomType = socketIdToRoomType.get(ws.id);
