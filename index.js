@@ -29,6 +29,9 @@ const PAIRED = "PAIRED";
 const PEER_DISCONNECTED = "PEER_DISCONNECTED";
 const INITIATOR = "INITIATOR";
 
+/** Max Connections Allowed From a Single IP */
+const MAX_CONNECTIONS_ALLOWED_FROM_SINGLE_IP = 3;
+
 // Maps to store necessary data
 const doubleChatRoomWaitingPeople = [];
 const doubleVideoRoomWaitingPeople = [];
@@ -99,7 +102,7 @@ uWS.SSLApp({
      */
     const ipCount = connectionsPerIp.get(address) || 0;
 
-    if (ipCount >= 3) {
+    if (ipCount >= MAX_CONNECTIONS_ALLOWED_FROM_SINGLE_IP) {
       res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
       return;
     }
