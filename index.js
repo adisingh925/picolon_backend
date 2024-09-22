@@ -11,13 +11,13 @@ const { validate: uuidValidate } = require('uuid');
 const WEBSITE_URL = "https://picolon.com";
 const allowedOrigins = [WEBSITE_URL];
 
-//constants
+/** Allowed Origins */
 const PRIVATE_TEXT_CHAT_DUO = '0';
 const PRIVATE_VIDEO_CHAT_DUO = '1';
 const PUBLIC_TEXT_CHAT_MULTI = '2';
 const PRIVATE_TEXT_CHAT_MULTI = '3';
 
-// server broadcast messages types
+/** Constants */
 const RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED';
 const ACCESS_DENIED = 'ACCESS_DENIED';
 const RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND';
@@ -32,7 +32,7 @@ const INITIATOR = "INITIATOR";
 /** Max Connections Allowed From a Single IP */
 const MAX_CONNECTIONS_ALLOWED_FROM_SINGLE_IP = 100000;
 
-// Maps to store necessary data
+/** Data Structures */
 const doubleChatRoomWaitingPeople = [];
 const doubleVideoRoomWaitingPeople = [];
 const textChatDuoRoomIdToSockets = new Map();
@@ -44,23 +44,24 @@ const textChatMultiRoomIdToSockets = new Map();
 const publicRoomIdToRoomData = new Map();
 const privateRoomIdToRoomData = new Map();
 
-// Number of active connections
+/** Variable to Store Active Connections */
 var connections = 0;
 
-// Port to listen
+/** Listen Port for HTTPS */
 const port = 443;
 
-// Certificate Path SSL/TLS certificate files
+/** Certificate Path */
 const keyFilePath = path.join(__dirname, 'ssl', 'private.key');
 const certFilePath = path.join(__dirname, 'ssl', 'certificate.crt');
 
-// rate limiter options for data transfer and API calls
+/** Websocket Message RateLimiter */
 const opts = {
   points: 50,
   duration: 1,
   blockDuration: 3,
 };
 
+/** API Call RateLimiter */
 const APICallOptions = {
   points: 3,
   duration: 1,
@@ -70,9 +71,9 @@ const APICallOptions = {
 const rateLimiter = new RateLimiterMemory(opts);
 const apiCallRateLimiter = new RateLimiterMemory(APICallOptions);
 
-// Allowed roomId types
+/** Allowed Types */
 const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
-const allowedReportingTypes = ['user-query', 'server-error', 'ui-error'];
+const allowedReportingTypes = ['user-query', 'ui-error'];
 
 uWS.SSLApp({
   key_file_name: keyFilePath,
@@ -108,25 +109,27 @@ uWS.SSLApp({
     }
 
     const roomType = req.getQuery("RT");
+    const roomName = req.getQuery("RN");
+    const roomId = req.getQuery("RID");
+
     if (!allowedRoomTypes.includes(roomType)) {
       res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
       return;
     }
 
-    const roomName = req.getQuery("RN");
-    if (roomName && typeof roomName !== 'string' && roomName.length > 0 && roomName.length <= 160) {
-      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
-      return;
-    }
-
-    const roomId = req.getQuery("RID");
-    if (roomId && typeof roomId !== 'string' && uuidValidate(roomId)) {
-      res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
-      return;
-    }
-
-    if ([PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI].includes(roomType)) {
-      if (!roomName && !roomId) {
+    if ([PRIVATE_TEXT_CHAT_MULTI, PUBLIC_TEXT_CHAT_MULTI].includes(roomType)) {
+      console.log(roomName, roomId);
+      if (roomName) {
+        if (roomName.length <= 0 || roomName.length > 160) {
+          res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
+          return;
+        }
+      } else if (roomId) {
+        if (!uuidValidate(roomId)) {
+          res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
+          return;
+        }
+      } else {
         res.writeStatus('403 Forbidden').end(ACCESS_DENIED);
         return;
       }
@@ -194,7 +197,7 @@ uWS.SSLApp({
     const origin = req.getHeader('origin');
 
     if (allowedOrigins.includes(origin)) {
-      setResponseHeaders(res, origin);
+      setResponseHeaders(res, origin, 'GET, OPTIONS');
       res.end(connections.toString());
     } else {
       res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
@@ -217,7 +220,7 @@ uWS.SSLApp({
     const origin = req.getHeader('origin');
 
     if (allowedOrigins.includes(origin)) {
-      setResponseHeaders(res, origin);
+      setResponseHeaders(res, origin, 'GET, OPTIONS');
       const rooms = Array.from(publicRoomIdToRoomData.values());
       res.end(JSON.stringify(rooms));
     } else {
@@ -245,7 +248,7 @@ uWS.SSLApp({
     const origin = req.getHeader('origin');
 
     if (allowedOrigins.includes(origin)) {
-      setResponseHeaders(res, origin);
+      setResponseHeaders(res, origin, 'POST, OPTIONS');
 
       let buffer = Buffer.from('');
 
@@ -492,9 +495,9 @@ const convertArrayBufferToString = (arrayBuffer) => {
  * @param {*} res 
  * @param {*} origin 
  */
-function setResponseHeaders(res, origin) {
+function setResponseHeaders(res, origin, allowedMethods) {
   res.writeHeader('Access-Control-Allow-Origin', origin);
-  res.writeHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST');
+  res.writeHeader('Access-Control-Allow-Methods', allowedMethods);
   res.writeHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   // Security headers

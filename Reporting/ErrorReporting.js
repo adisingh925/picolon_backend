@@ -5,11 +5,13 @@ async function postToDiscord(body) {
     const USER_QUERY = 'user-query';
     const SERVER_ERROR = 'server-error';
     const UI_ERROR = 'ui-error';
+    const GENERAL = 'general';
 
     const webhookUrls = {
         [USER_QUERY]: 'https://discord.com/api/webhooks/1287347063536881664/u34TvWxS61JYOuR7qWTles-G0c1rYSsmIjKg5C80tof37kt9pQ_gVIbb1FcX-xC7qlhu',
         [SERVER_ERROR]: 'https://discord.com/api/webhooks/1287347180998492170/OV-TaYd2PzNXeAs5TcTBc5S7-43X6yXxi_qJzshUnV7XUO6lgbP7wGmUTjzpxqtLLLFD',
-        [UI_ERROR]: 'https://discord.com/api/webhooks/1287347257556992000/pOB7ELm64nAWTsrabjrx5r7kAyORNAE_xCEo3dm4_QVlAOPXSRLKG1I38yVCfFuuxWC0'
+        [UI_ERROR]: 'https://discord.com/api/webhooks/1287347257556992000/pOB7ELm64nAWTsrabjrx5r7kAyORNAE_xCEo3dm4_QVlAOPXSRLKG1I38yVCfFuuxWC0',
+        [GENERAL]: 'https://discord.com/api/webhooks/1287361536586944564/tPz_UNv6m7NYPxAJUMlJDR3ClLrV1UiTnaWc44AO80bOITNebXNNOtSbeChMdRBE2efz'  
     };
 
     try {
