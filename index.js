@@ -7,6 +7,7 @@ const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
 const reporting = require('./Reporting/ErrorReporting');
 const { validate: uuidValidate } = require('uuid');
+const { throws } = require('assert');
 
 const WEBSITE_URL = "https://picolon.com";
 const allowedOrigins = [WEBSITE_URL];
@@ -317,9 +318,9 @@ uWS.SSLApp({
  * @param {*} isConnected 
  */
 const reconnect = async (ws, isConnected = false) => {
-  try {
-    lock.acquire("reconnect", async (done) => {
-
+  lock.acquire(
+    "reconnect",
+    () => {
       if (isConnected) {
         connections++;
         connectionsPerIp.set(ws.ip, (connectionsPerIp.get(ws.ip) || 0) + 1);
@@ -376,8 +377,6 @@ const reconnect = async (ws, isConnected = false) => {
           } else {
             ws.send(JSON.stringify({ type: ROOM_NOT_FOUND }));
             ws.close();
-            done();
-            return;
           }
         }
       } else {
@@ -405,13 +404,19 @@ const reconnect = async (ws, isConnected = false) => {
           waitingPeople.push(ws);
         }
       }
+    }
+  ).then(() => {
+    console.log('Reconnect successful, lock released');
+  }).catch((error) => {
+    console.log('Error in reconnect:', error.message);
 
-      done();
-    }, function (err, ret) {
-    }, {});
-  } catch (error) {
-    console.log('Error in reconnect', error);
-  }
+    reporting.postToDiscord({
+      type: 'server-error',
+      title: 'Error in reconnect',
+      message: error.message,
+      stackTrace: error.stack
+    });
+  });
 }
 
 /**
@@ -419,8 +424,9 @@ const reconnect = async (ws, isConnected = false) => {
  * @param {*} ws 
  */
 const handleDisconnect = async (ws) => {
-  try {
-    lock.acquire("disconnect", async (done) => {
+  lock.acquire(
+    "disconnect",
+    (done) => {
       connections--;
       connectionsPerIp.set(ws.ip, (connectionsPerIp.get(ws.ip) - 1));
       rateLimiter.delete(ws.id);
@@ -472,11 +478,19 @@ const handleDisconnect = async (ws) => {
       }
 
       done();
-    }, function (err, ret) {
-    }, {});
-  } catch (error) {
-    console.log('Error in handleDisconnect', error);
-  }
+    }
+  ).then(() => {
+    console.log('Disconnect successful, lock released');
+  }).catch((error) => {
+    console.log('Error in disconnect:', error.message);
+
+    reporting.postToDiscord({
+      type: 'server-error',
+      title: 'Error in disconnect',
+      message: error.message,
+      stackTrace: error.stack
+    });
+  });
 }
 
 /**
@@ -523,3 +537,29 @@ function validateIPAddress(ip) {
 
   return false;
 }
+
+process.on('uncaughtException', async (error) => {
+  console.log('Uncaught Exception:', error.message);
+
+  await reporting.postToDiscord({
+    type: 'server-error',
+    title: 'Uncaught Exception',
+    message: error.message,
+    stackTrace: error.stack
+  });
+
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  console.log('Unhandled Rejection at : ', promise, 'reason:', reason);
+
+  await reporting.postToDiscord({
+    type: 'server-error',
+    title: 'Unhandled Rejection',
+    message: reason.message,
+    stackTrace: reason.stack
+  });
+
+  process.exit(1);
+});

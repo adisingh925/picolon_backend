@@ -11,7 +11,7 @@ async function postToDiscord(body) {
         [USER_QUERY]: 'https://discord.com/api/webhooks/1287347063536881664/u34TvWxS61JYOuR7qWTles-G0c1rYSsmIjKg5C80tof37kt9pQ_gVIbb1FcX-xC7qlhu',
         [SERVER_ERROR]: 'https://discord.com/api/webhooks/1287347180998492170/OV-TaYd2PzNXeAs5TcTBc5S7-43X6yXxi_qJzshUnV7XUO6lgbP7wGmUTjzpxqtLLLFD',
         [UI_ERROR]: 'https://discord.com/api/webhooks/1287347257556992000/pOB7ELm64nAWTsrabjrx5r7kAyORNAE_xCEo3dm4_QVlAOPXSRLKG1I38yVCfFuuxWC0',
-        [GENERAL]: 'https://discord.com/api/webhooks/1287361536586944564/tPz_UNv6m7NYPxAJUMlJDR3ClLrV1UiTnaWc44AO80bOITNebXNNOtSbeChMdRBE2efz'  
+        [GENERAL]: 'https://discord.com/api/webhooks/1287361536586944564/tPz_UNv6m7NYPxAJUMlJDR3ClLrV1UiTnaWc44AO80bOITNebXNNOtSbeChMdRBE2efz'
     };
 
     try {
@@ -42,6 +42,7 @@ async function postToDiscord(body) {
                     embeds: [
                         {
                             color: 16711680, // Red color for error
+                            title: body.title,
                             fields: [
                                 {
                                     name: "Error Message",
@@ -81,17 +82,12 @@ async function postToDiscord(body) {
 
                 break;
 
-            default:
-                throw new Error("Invalid message type. Use 'user-queries', 'server-error', or 'ui-error'.");
+            default: throw new Error("Invalid message type. Use 'user-queries', 'server-error', or 'ui-error'.");
         }
 
         // Send the payload to the Discord webhook
-        if (payload.message !== undefined && payload.message !== null && payload.message.trim().length > 0) {
-            await axios.post(webhookUrls[body.type], payload);
-            console.log(`${body.type} posted to Discord successfully.`);
-        } else {
-            console.log('No message to post to Discord');
-        }
+        await axios.post(webhookUrls[body.type], payload);
+        console.log(`${body.type} posted to Discord successfully.`);
     } catch (postError) {
         console.error('Failed to post to Discord:', postError);
     }
