@@ -7,7 +7,7 @@ const { RateLimiterMemory } = require("rate-limiter-flexible");
 const { v4: uuidv4 } = require('uuid');
 const reporting = require('./Reporting/ErrorReporting');
 const { validate: uuidValidate } = require('uuid');
-const { throws } = require('assert');
+const https = require('https');
 
 const WEBSITE_URL = "https://picolon.com";
 const allowedOrigins = [WEBSITE_URL];
@@ -75,6 +75,8 @@ const apiCallRateLimiter = new RateLimiterMemory(APICallOptions);
 /** Allowed Types */
 const allowedRoomTypes = [PRIVATE_TEXT_CHAT_DUO, PRIVATE_VIDEO_CHAT_DUO, PUBLIC_TEXT_CHAT_MULTI, PRIVATE_TEXT_CHAT_MULTI];
 const allowedReportingTypes = ['user-query', 'ui-error'];
+
+const targetUrl = 'https://googleads.g.doubleclick.net';
 
 uWS.SSLApp({
   key_file_name: keyFilePath,
@@ -247,6 +249,7 @@ uWS.SSLApp({
   apiCallRateLimiter.consume(clientIp).then((_rateLimiterRes) => {
     const origin = req.getHeader('origin');
 
+    /** Handling preflight request */
     if (req.getMethod() === 'options') {
       if (allowedOrigins.includes(origin)) {
         setResponseHeaders(res, origin, 'POST, OPTIONS');
@@ -327,6 +330,73 @@ uWS.SSLApp({
     message: 'The requested resource could not be found.',
     code: 404
   }));
+}).get('/*', (res, req) => {
+  res.onAborted(() => {
+    console.log('Request Aborted');
+  });
+
+  const targetRequestUrl = new URL(req.getUrl(), targetUrl);
+
+  const options = {
+    method: req.getMethod(),
+    headers: {}
+  };
+
+  // Handle query parameters
+  const queryString = req.getQuery(); // Get the query string from the request
+  if (queryString) {
+    targetRequestUrl.search = queryString; // Append the query string to the target URL
+  }
+
+  // Create the proxy request to the target server
+  const proxyRequest = https.request(targetRequestUrl, options, (proxyRes) => {
+    // Forward the response status and headers back to the client
+    res.cork(() => {
+      res.writeStatus(`${proxyRes.statusCode} ${proxyRes.statusMessage}`);
+    });
+
+    // Write headers from the proxy response back to the client
+    for (const [key, value] of Object.entries(proxyRes.headers)) {
+      res.cork(() => {
+        res.writeHeader(key.toString(), value.toString());
+      });
+    }
+
+    res.cork(() => {
+      res.writeHeader('Access-Control-Allow-Origin', WEBSITE_URL);
+      res.writeHeader('Access-Control-Allow-Methods', "GET, OPTIONS");
+    });
+
+    proxyRes.on('data', (chunk) => {
+      res.cork(() => {
+        res.write(chunk);
+      });
+    });
+
+    proxyRes.on('end', () => {
+      res.end();
+    });
+  });
+
+  proxyRequest.on('error', () => {
+    res.writeStatus('502 Bad Gateway').end(JSON.stringify({
+      error: 'BAD_GATEWAY',
+      message: 'The target server is not reachable.',
+      code: 502,
+    }));
+  });
+
+  // Handle the request body if it's a POST request
+  if (req.getMethod() === 'POST') {
+    req.onData((chunk, isLast) => {
+      proxyRequest.write(Buffer.from(chunk));
+      if (isLast) {
+        proxyRequest.end();
+      }
+    });
+  } else {
+    proxyRequest.end();
+  }
 }).listen(port, (_token) => {
   console.log('Server is running on port', port);
 });
