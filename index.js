@@ -237,7 +237,7 @@ uWS.SSLApp({
       code: 429
     }));
   });
-}).post("/api/v1/reporting", (res, req) => {
+}).any("/api/v1/reporting", (res, req) => {
   res.onAborted(() => {
     console.log('Request Aborted');
   });
@@ -247,52 +247,71 @@ uWS.SSLApp({
   apiCallRateLimiter.consume(clientIp).then((_rateLimiterRes) => {
     const origin = req.getHeader('origin');
 
-    if (allowedOrigins.includes(origin)) {
-      setResponseHeaders(res, origin, 'POST, OPTIONS');
+    if (req.getMethod() === 'options') {
+      if (allowedOrigins.includes(origin)) {
+        setResponseHeaders(res, origin, 'POST, OPTIONS');
+        res.end();
+      } else {
+        res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+          error: ACCESS_DENIED,
+          message: 'You do not have permission to access this resource.',
+          code: 403
+        }));
+      }
+    } else if (req.getMethod() == 'post') {
+      if (allowedOrigins.includes(origin)) {
+        setResponseHeaders(res, origin, 'POST, OPTIONS');
 
-      let buffer = Buffer.from('');
+        let buffer = Buffer.from('');
 
-      res.onData((chunk, isLast) => {
-        buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+        res.onData((chunk, isLast) => {
+          buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
 
-        if (isLast) {
-          try {
-            const body = JSON.parse(buffer.toString());
+          if (isLast) {
+            try {
+              const body = JSON.parse(buffer.toString());
 
-            if (body.type && !allowedReportingTypes.includes(body.type)) {
+              if (body.type && !allowedReportingTypes.includes(body.type)) {
+                res.writeStatus('400 Bad Request');
+                res.writeHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({
+                  error: 'Invalid JSON',
+                  code: 400
+                }));
+
+                return;
+              } else {
+                reporting.postToDiscord(body)
+              }
+
+              res.writeStatus('200 OK');
+              res.writeHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({
+                message: 'Error reported successfully',
+                code: 200
+              }));
+            } catch (e) {
               res.writeStatus('400 Bad Request');
               res.writeHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({
                 error: 'Invalid JSON',
                 code: 400
               }));
-
-              return;
-            } else {
-              reporting.postToDiscord(body)
             }
-
-            res.writeStatus('200 OK');
-            res.writeHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({
-              message: 'Error reported successfully',
-              code: 200
-            }));
-          } catch (e) {
-            res.writeStatus('400 Bad Request');
-            res.writeHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({
-              error: 'Invalid JSON',
-              code: 400
-            }));
           }
-        }
-      });
+        });
+      } else {
+        res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+          error: ACCESS_DENIED,
+          message: 'You do not have permission to access this resource.',
+          code: 403
+        }));
+      }
     } else {
-      res.writeStatus('403 Forbidden').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
-        error: ACCESS_DENIED,
-        message: 'You do not have permission to access this resource.',
-        code: 403
+      res.writeStatus('405 Method Not Allowed').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+        error: 'Method Not Allowed',
+        message: 'The requested method is not allowed.',
+        code: 405
       }));
     }
   }).catch((_rateLimiterRes) => {
