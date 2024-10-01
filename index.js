@@ -324,13 +324,7 @@ uWS.SSLApp({
       code: 429
     }));
   });
-}).any("/*", (res, _req) => {
-  res.writeStatus('404 Not Found').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
-    error: RESOURCE_NOT_FOUND,
-    message: 'The requested resource could not be found.',
-    code: 404
-  }));
-}).get('/*', (res, req) => {
+}).get('/pagead/viewthroughconversion/*', (res, req) => {
   res.onAborted(() => {
     console.log('Request Aborted');
   });
@@ -342,20 +336,21 @@ uWS.SSLApp({
     headers: {}
   };
 
-  // Handle query parameters
-  const queryString = req.getQuery(); // Get the query string from the request
+  /** Handle query parameters */
+  const queryString = req.getQuery();
   if (queryString) {
-    targetRequestUrl.search = queryString; // Append the query string to the target URL
+    /** Append the query string to the target URL */
+    targetRequestUrl.search = queryString;
   }
 
-  // Create the proxy request to the target server
+  /** Create the proxy request to the target server */
   const proxyRequest = https.request(targetRequestUrl, options, (proxyRes) => {
-    // Forward the response status and headers back to the client
+    /** Forward the response status and headers back to the client */
     res.cork(() => {
       res.writeStatus(`${proxyRes.statusCode} ${proxyRes.statusMessage}`);
     });
 
-    // Write headers from the proxy response back to the client
+    /** Write headers from the proxy response back to the client */
     for (const [key, value] of Object.entries(proxyRes.headers)) {
       res.cork(() => {
         res.writeHeader(key.toString(), value.toString());
@@ -374,22 +369,28 @@ uWS.SSLApp({
     });
 
     proxyRes.on('end', () => {
-      res.end();
+      res.cork(() => {
+        res.end();
+      });
     });
   });
 
   proxyRequest.on('error', () => {
-    res.writeStatus('502 Bad Gateway').end(JSON.stringify({
-      error: 'BAD_GATEWAY',
-      message: 'The target server is not reachable.',
-      code: 502,
-    }));
+    res.cork(() => {
+      res.writeStatus('502 Bad Gateway').end(JSON.stringify({
+        error: 'BAD_GATEWAY',
+        message: 'The target server is not reachable.',
+        code: 502,
+      }));
+    })
   });
 
-  // Handle the request body if it's a POST request
+  /** Handle the request body if it's a POST request */
   if (req.getMethod() === 'POST') {
     req.onData((chunk, isLast) => {
-      proxyRequest.write(Buffer.from(chunk));
+      res.cork(() => {
+        proxyRequest.write(Buffer.from(chunk));
+      });
       if (isLast) {
         proxyRequest.end();
       }
@@ -397,6 +398,14 @@ uWS.SSLApp({
   } else {
     proxyRequest.end();
   }
+}).any("/*", (res, _req) => {
+  res.cork(() => {
+    res.writeStatus('404 Not Found').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
+      error: RESOURCE_NOT_FOUND,
+      message: 'The requested resource could not be found.',
+      code: 404
+    }));
+  });
 }).listen(port, (_token) => {
   console.log('Server is running on port', port);
 });
