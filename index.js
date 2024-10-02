@@ -31,7 +31,7 @@ const PEER_DISCONNECTED = "PEER_DISCONNECTED";
 const INITIATOR = "INITIATOR";
 
 /** Max Connections Allowed From a Single IP */
-const MAX_CONNECTIONS_ALLOWED_FROM_SINGLE_IP = 100000;
+const MAX_CONNECTIONS_ALLOWED_FROM_SINGLE_IP = 3;
 
 /** Data Structures */
 const doubleChatRoomWaitingPeople = [];
