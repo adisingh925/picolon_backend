@@ -1,0 +1,4 @@
+# robots.txt for https://api.picolon.com
+
+User-agent: *
+Allow: /

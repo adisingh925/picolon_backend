@@ -8,6 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 const reporting = require('./Reporting/ErrorReporting');
 const { validate: uuidValidate } = require('uuid');
 const https = require('https');
+const fs = require('fs');
 
 const WEBSITE_URL = "https://picolon.com";
 const allowedOrigins = [WEBSITE_URL];
@@ -398,6 +399,33 @@ uWS.SSLApp({
   } else {
     proxyRequest.end();
   }
+}).any("/robots.txt", (res, _req) => {
+  res.onAborted(() => {
+    console.log('Request Aborted');
+  });
+
+  /** Read the robots.txt file from the filesystem */
+  fs.readFile('static/robots.txt', 'utf8', (err, data) => {
+    if (err) {
+      /** If there's an error reading the file, send a 404 response */
+      res.cork(() => {
+        res.writeStatus('404 Not Found')
+          .writeHeader('Content-Type', 'application/json')
+          .end(JSON.stringify({
+            error: "RESOURCE_NOT_FOUND",
+            message: 'The requested resource could not be found.',
+            code: 404
+          }));
+      });
+    } else {
+      /** If the file is read successfully, send it as the response */
+      res.cork(() => {
+        res.writeStatus('200 OK')
+          .writeHeader('Content-Type', 'text/plain')
+          .end(data);
+      });
+    }
+  });
 }).any("/*", (res, _req) => {
   res.cork(() => {
     res.writeStatus('404 Not Found').writeHeader('Content-Type', 'application/json').end(JSON.stringify({
