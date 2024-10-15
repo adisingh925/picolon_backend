@@ -532,7 +532,7 @@ const reconnect = async (ws, isConnected = false) => {
       }
     }
   ).then(() => {
-    console.log('Reconnect successful, lock released');
+    /** reconnect successfull, lock released */
   }).catch((error) => {
     console.log('Error in reconnect:', error.message);
 
@@ -606,7 +606,7 @@ const handleDisconnect = async (ws) => {
       done();
     }
   ).then(() => {
-    console.log('Disconnect successful, lock released');
+    /** disconnect successfull, lock released */
   }).catch((error) => {
     console.log('Error in disconnect:', error.message);
 
