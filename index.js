@@ -87,6 +87,7 @@ uWS.SSLApp({
   maxPayloadLength: 1048576,
   maxLifetime: 0,
   idleTimeout: 10,
+  maxBackpressure: 1000000,
 
   upgrade: (res, req, context) => {
     /**
